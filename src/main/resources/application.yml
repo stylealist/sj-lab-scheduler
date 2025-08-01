@@ -12,5 +12,30 @@ server:
 spring:
   application:
     name: sj-lab-scheduler
-
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+  #profiles:
+  #  active: local
+  #datasource:
+  #  url: jdbc:postgresql://118.67.132.31:5432/map-service
+  #  username: admin
+  #  password: xogml159
+  #jpa:
+  #  hibernate:
+  #    ddl-auto: update
+  #  properties:
+  #    hibernate:
+  #      format_sql: true
+  #  show-sql: true
+logging:
+  level:
+    org.springframework: debug
+# 추후 보안에 맞게 설정해야 함
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "self,health"
 
