@@ -1,4 +1,4 @@
-package com.example.mapservice;
+package com.example.scheduler;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
