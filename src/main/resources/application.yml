@@ -1,0 +1,16 @@
+# test
+# application.yml
+server:
+  port: 0
+  servlet:
+    context-path: /scheduler
+  message:
+    basename: messages
+  forward-headers-strategy: framework
+#  port: ${random.int(10000,51000)}
+
+spring:
+  application:
+    name: sj-lab-scheduler
+
+

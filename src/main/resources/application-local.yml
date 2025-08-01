@@ -1,0 +1,13 @@
+eureka:
+  client:
+    fetch-registry: true
+    register-with-eureka: true
+    service-url:
+      defaultZone: http://localhost:8761/eureka
+  instance:
+    instance-id: ${spring.application.name}:${spring.application.instance_id:${random.value}}
+
+#springdoc:
+#  swagger-ui:
+#    config-url: /map/v3/api-docs/swagger-config # NOTE: local 에서는 prefix 없이 swagger-ui 에서 사용하는 default 설정을 사용하도록 덮어 씀
+#    url: /map/v3/api-docs # NOTE: local 에서는 prefix 없이 swagger-ui 에서 사용하는 default 설정을 사용하도록 덮어 씀
