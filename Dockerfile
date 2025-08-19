@@ -5,7 +5,7 @@ FROM openjdk:17-jdk-alpine
 WORKDIR /app
 
 # 빌드된 JAR 파일을 복사
-COPY target/sj-lab-scheduler.jar /app/sj-lab-scheduler.jar
+COPY target/sj-lab-mapservice-rest.jar /app/sj-lab-mapservice-rest.jar
 
 # 포트 노출 (Eureka 서버의 기본 포트)
 #EXPOSE 8761
@@ -15,4 +15,4 @@ COPY target/sj-lab-scheduler.jar /app/sj-lab-scheduler.jar
 # ENV SPRING_PROFILES_ACTIVE=prod
 
 # 애플리케이션 실행
-ENTRYPOINT ["java", "-jar", "/app/sj-lab-scheduler.jar"]
+ENTRYPOINT ["java", "-jar", "/app/sj-lab-mapservice-rest.jar"]

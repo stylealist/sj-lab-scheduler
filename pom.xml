@@ -9,7 +9,7 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.example</groupId>
-    <artifactId>sj-lab-scheduler</artifactId>
+    <artifactId>sj-lab-mapservice-rest</artifactId>
     <version>1.0.0</version>
     <name>sj-lab-mapservice-rest</name>
     <description>sj-lab-mapservice-rest</description>

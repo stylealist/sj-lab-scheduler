@@ -29,6 +29,7 @@ spring:
   #    hibernate:
   #      format_sql: true
   #  show-sql: true
+
 logging:
   level:
     org.springframework: debug
@@ -39,3 +40,9 @@ management:
       exposure:
         include: "self,health"
 
+# 동적이지않아 코드로 변경
+#security:
+#  user:
+#    name: stylealist
+#    password: 1q2w3e4r
+#platform: postgres
