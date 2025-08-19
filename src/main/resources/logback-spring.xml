@@ -1,0 +1,17 @@
+<configuration>
+    <!-- 콘솔로 로그를 출력하는 Appender 설정 -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <!-- 로그 출력 포맷 설정 -->
+            <!-- %d : 날짜, %-5level : 로그 레벨, %logger{36} : 클래스명, %msg : 메시지 -->
+            <pattern>%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- 루트 로거 설정 -->
+    <!-- 전체 애플리케이션에 대해 기본 로그 레벨을 INFO로 설정 -->
+    <!-- CONSOLE appender를 통해 로그를 콘솔에 출력함 -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+    </root>
+</configuration>

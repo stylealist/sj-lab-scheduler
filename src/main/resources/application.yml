@@ -16,6 +16,9 @@ spring:
     exclude:
       - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
       - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+  task:
+    scheduling:
+      enabled: true
   #profiles:
   #  active: local
   #datasource:
@@ -29,10 +32,10 @@ spring:
   #    hibernate:
   #      format_sql: true
   #  show-sql: true
-
 logging:
   level:
-    org.springframework: debug
+    org.springframework: info
+    root: info
 # 추후 보안에 맞게 설정해야 함
 management:
   endpoints:
@@ -40,9 +43,5 @@ management:
       exposure:
         include: "self,health"
 
-# 동적이지않아 코드로 변경
-#security:
-#  user:
-#    name: stylealist
-#    password: 1q2w3e4r
-#platform: postgres
+apikey:  # 외부 연동 API 키 모음
+  safe: ISGUSHVA-ISGU-ISGU-ISGU-ISGUSHVA5T  # 생활안전정보 API
