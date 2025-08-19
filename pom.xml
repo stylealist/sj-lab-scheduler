@@ -9,10 +9,10 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.example</groupId>
-    <artifactId>sj-lab-mapservice-rest</artifactId>
+    <artifactId>sj-lab-scheduler</artifactId>
     <version>1.0.0</version>
-    <name>sj-lab-mapservice-rest</name>
-    <description>sj-lab-mapservice-rest</description>
+    <name>sj-lab-scheduler</name>
+    <description>sj-lab-scheduler</description>
     <url/>
     <licenses>
         <license/>
@@ -106,7 +106,7 @@
         </dependencies>
     </dependencyManagement>
     <build>
-        <finalName>sj-lab-mapservice-rest</finalName>
+        <finalName>sj-lab-scheduler</finalName>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
