@@ -15,4 +15,4 @@ COPY target/sj-lab-scheduler.jar /app/sj-lab-scheduler.jar
 # ENV SPRING_PROFILES_ACTIVE=prod
 
 # 애플리케이션 실행
-ENTRYPOINT ["java", "-jar", "/app/sj-lab-mapservice-rest.jar"]
+ENTRYPOINT ["java", "-jar", "/app/sj-lab-scheduler.jar"]
