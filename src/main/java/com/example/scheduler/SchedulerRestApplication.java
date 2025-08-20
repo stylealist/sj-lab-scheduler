@@ -1,5 +1,6 @@
 package com.example.scheduler;
 
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
@@ -13,6 +14,7 @@ import java.util.Locale;
 @SpringBootApplication
 @EnableScheduling
 @EnableDiscoveryClient
+@MapperScan("com.example.scheduler.mapper")
 public class SchedulerRestApplication {
 
     public static void main(String[] args) {

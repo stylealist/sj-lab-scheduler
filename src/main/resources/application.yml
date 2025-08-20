@@ -12,26 +12,18 @@ server:
 spring:
   application:
     name: sj-lab-scheduler
-  autoconfigure:
-    exclude:
-      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
-      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
   task:
     scheduling:
       enabled: true
-  #profiles:
-  #  active: local
-  #datasource:
-  #  url: jdbc:postgresql://118.67.132.31:5432/map-service
-  #  username: admin
-  #  password: xogml159
-  #jpa:
-  #  hibernate:
-  #    ddl-auto: update
-  #  properties:
-  #    hibernate:
-  #      format_sql: true
-  #  show-sql: true
+  datasource:
+    url: jdbc:postgresql://211.188.62.54:30017/sjlab
+    username: stylealist
+    password: "!@xogml159"
+    driver-class-name: org.postgresql.Driver  # URL로 자동판별되지만 명시해도 OK
+
+mybatis:
+  mapper-locations: classpath*:mapper/**/*.xml
+
 logging:
   level:
     org.springframework: info
