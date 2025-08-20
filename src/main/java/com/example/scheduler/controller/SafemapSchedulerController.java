@@ -31,7 +31,6 @@ public class SafemapSchedulerController {
     //@RequestMapping("/store")
     @Scheduled(cron = "0 30 16 * * *")
     public void ConvenienceStore() {
-        log.error("ConvenienceStore 실행!");
         final int pageSize = 2000;
         List<Map<String, Object>> totalList = new ArrayList<>();
         try {
@@ -58,7 +57,6 @@ public class SafemapSchedulerController {
                         + "&" + URLEncoder.encode("pageNo","UTF-8") + "=" + pageNo;
                 Map<String, Object> body = callSafemap(url);
                 totalList.addAll(extractItems(body));
-                System.out.println("적재된 한 데이터 : "+extractItems(body));
                 System.out.println("적재된 데이터 수 : "+totalList.size());
             }
             int insertConvenienceStore = safemapService.insertConvenienceStore(totalList);
