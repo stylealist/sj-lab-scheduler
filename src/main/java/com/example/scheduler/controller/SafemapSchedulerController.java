@@ -29,7 +29,7 @@ public class SafemapSchedulerController {
     }
 
     //@RequestMapping("/store")
-    @Scheduled(cron = "0 30 16 * * *")
+    @Scheduled(cron = "0 07 13 * * *")
     public void ConvenienceStore() {
         final int pageSize = 2000;
         List<Map<String, Object>> totalList = new ArrayList<>();

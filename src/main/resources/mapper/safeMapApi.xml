@@ -4,8 +4,80 @@
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 <mapper namespace="com.example.scheduler.mapper.SafemapMapper">
-
     <insert id="insertConvenienceStore" parameterType="java.util.List">
+        INSERT INTO map.convenience_store
+        (
+        objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
+        telno, fclty_ty, data_yr, x, y, raw,
+        geom, -- 3857로 저장
+        feature, -- 미리 만들어 둘 GeoJSON Feature(JSON)
+        created_at, updated_at
+        )
+        SELECT
+        v.objt_id, v.fclty_cd, v.fclty_nm, v.adres, v.rn_adres, v.sgg_cd, v.emd_cd, v.ctprvn_cd,
+        v.telno, v.fclty_ty, v.data_yr, v.x, v.y, v.raw,
+        /* ===== geom (EPSG:3857) ===== */
+        CASE
+        WHEN v.x IS NOT NULL AND v.y IS NOT NULL
+        THEN ST_SetSRID(ST_MakePoint(v.x, v.y), 3857)
+        ELSE NULL
+        END AS geom,
+
+        /* ===== feature (GeoJSON Feature, geometry는 EPSG:4326로 직렬화) ===== */
+        CASE
+        WHEN v.x IS NOT NULL AND v.y IS NOT NULL THEN
+        json_build_object(
+        'type', 'Feature',
+        'id', 'map:convenience_store.' || v.objt_id::text,
+        'geometry',
+        /* 3857 → 4326 변환 + 좌표 스냅(1e-5) + 소수5자리 */
+        ST_AsGeoJSON(
+        ST_SnapToGrid(
+        ST_Transform(ST_SetSRID(ST_MakePoint(v.x, v.y), 3857), 4326),
+        1e-5, 1e-5
+        ),
+        5
+        )::json,
+        'properties', json_build_object(
+        'fclty_nm', v.fclty_nm,
+        'adres', v.adres,
+        'rn_adres', v.rn_adres
+        )
+        )
+        ELSE NULL
+        END AS feature,
+
+        now(), now()
+        FROM (
+        VALUES
+        <foreach collection="list" item="i" separator=",">
+            (
+            CAST(#{i.objtId} AS bigint),
+            #{i.fcltyCd},
+            #{i.fcltyNm},
+            #{i.adres},
+            #{i.rnAdres},
+            #{i.sggCd},
+            #{i.emdCd},
+            #{i.ctprvnCd},
+            #{i.telno},
+            #{i.fcltyTy},
+            CAST(#{i.dataYr} AS integer),
+            CAST(#{i.x} AS double precision),
+            CAST(#{i.y} AS double precision),
+            CAST(#{i.rawJson} AS jsonb)
+            )
+        </foreach>
+        ) AS v(
+        objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
+        telno, fclty_ty, data_yr, x, y, raw
+        )
+        LEFT JOIN map.convenience_store cs
+        ON cs.objt_id = v.objt_id
+        WHERE cs.objt_id IS NULL
+    </insert>
+
+    <!--<insert id="insertConvenienceStore" parameterType="java.util.List">
         INSERT INTO map.convenience_store
         (objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
         telno, fclty_ty, data_yr, x, y, raw, geom, created_at, updated_at)
@@ -45,6 +117,6 @@
         LEFT JOIN map.convenience_store cs
         ON cs.objt_id = v.objt_id
         WHERE cs.objt_id IS NULL
-    </insert>
+    </insert>-->
 
 </mapper>
