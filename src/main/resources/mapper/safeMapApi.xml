@@ -6,24 +6,16 @@
 <mapper namespace="com.example.scheduler.mapper.SafemapMapper">
     <insert id="insertConvenienceStore" parameterType="java.util.List">
         INSERT INTO map.convenience_store
-        (
-        objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
-        telno, fclty_ty, data_yr,
-        x, y,              -- ★ 3857 로 저장
-        raw,
-        geom,              -- ★ EPSG:3857
-        created_at, updated_at
-        )
+        (objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
+        telno, fclty_ty, data_yr, x, y, raw, geom, created_at, updated_at)
         SELECT
         v.objt_id, v.fclty_cd, v.fclty_nm, v.adres, v.rn_adres, v.sgg_cd, v.emd_cd, v.ctprvn_cd,
-        v.telno, v.fclty_ty, v.data_yr,
-
-        /* 3857로 변환한 좌표를 x,y에 저장 */
-        CASE WHEN g.geom_3857 IS NOT NULL THEN ST_X(g.geom_3857) END AS x,
-        CASE WHEN g.geom_3857 IS NOT NULL THEN ST_Y(g.geom_3857) END AS y,
-
-        v.raw,
-        g.geom_3857 AS geom,
+        v.telno, v.fclty_ty, v.data_yr, v.x, v.y, v.raw,
+        CASE
+        WHEN v.x IS NOT NULL AND v.y IS NOT NULL
+        THEN ST_SetSRID(ST_MakePoint(v.x, v.y), 3857)
+        ELSE NULL
+        END AS geom,
         now(), now()
         FROM (
         VALUES
@@ -40,8 +32,8 @@
             #{i.telno},
             #{i.fcltyTy},
             CAST(#{i.dataYr} AS integer),
-            CAST(#{i.x} AS double precision),  -- 입력: 4326 (lon 가정)
-            CAST(#{i.y} AS double precision),  -- 입력: 4326 (lat 가정)
+            CAST(#{i.x} AS double precision),
+            CAST(#{i.y} AS double precision),
             CAST(#{i.rawJson} AS jsonb)
             )
         </foreach>
@@ -49,34 +41,8 @@
         objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
         telno, fclty_ty, data_yr, x, y, raw
         )
-
-        /* 1) 4326 유효성 검사 + 뒤집힘 자동 보정 */
-        CROSS JOIN LATERAL (
-        SELECT
-        CASE
-        WHEN v.x BETWEEN -180 AND 180 AND v.y BETWEEN -90 AND 90 THEN v.x             -- 정상
-        WHEN v.y BETWEEN -180 AND 180 AND v.x BETWEEN -90 AND 90 THEN v.y             -- 뒤집힘 → swap
-        ELSE NULL
-        END AS lon_4326,
-        CASE
-        WHEN v.x BETWEEN -180 AND 180 AND v.y BETWEEN -90 AND 90 THEN v.y
-        WHEN v.y BETWEEN -180 AND 180 AND v.x BETWEEN -90 AND 90 THEN v.x
-        ELSE NULL
-        END AS lat_4326
-        ) norm
-
-        /* 2) 4326 → 3857 변환 (유효할 때만) */
-        CROSS JOIN LATERAL (
-        SELECT CASE
-        WHEN norm.lon_4326 IS NOT NULL AND norm.lat_4326 IS NOT NULL
-        THEN ST_Transform(ST_SetSRID(ST_MakePoint(norm.lon_4326, norm.lat_4326), 4326), 3857)
-        ELSE NULL
-        END AS geom_3857
-        ) g
-
         LEFT JOIN map.convenience_store cs
         ON cs.objt_id = v.objt_id
         WHERE cs.objt_id IS NULL
-        AND g.geom_3857 IS NOT NULL;   <!-- ★ 유효 좌표만 insert -->
     </insert>
 </mapper>
