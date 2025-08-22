@@ -9,34 +9,43 @@
         (
         objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
         telno, fclty_ty, data_yr,
-        x, y,        -- 3857로 변환된 좌표 저장
+        x, y,            -- 원본 4326 값 그대로 저장
         raw,
-        geom,        -- EPSG:3857
-        feature,     -- geometry도 3857 GeoJSON
+        geom,            -- 3857
+        feature,         -- geometry도 3857 GeoJSON
         created_at, updated_at
         )
         SELECT
         v.objt_id, v.fclty_cd, v.fclty_nm, v.adres, v.rn_adres, v.sgg_cd, v.emd_cd, v.ctprvn_cd,
         v.telno, v.fclty_ty, v.data_yr,
-
-        CASE WHEN g.geom_3857 IS NOT NULL THEN ST_X(g.geom_3857) END AS x,
-        CASE WHEN g.geom_3857 IS NOT NULL THEN ST_Y(g.geom_3857) END AS y,
-
+        v.x, v.y,
         v.raw,
-        g.geom_3857 AS geom,
 
-        CASE WHEN g.geom_3857 IS NOT NULL THEN
+        -- geom: 4326 -> 3857 변환
+        CASE
+        WHEN v.x IS NOT NULL AND v.y IS NOT NULL
+        THEN ST_Transform(ST_SetSRID(ST_MakePoint(v.x, v.y), 4326), 3857)
+        ELSE NULL
+        END AS geom,
+
+        -- feature.geometry: 3857 좌표로 직렬화(정밀도 제한/스냅 없음)
+        CASE
+        WHEN v.x IS NOT NULL AND v.y IS NOT NULL THEN
         json_build_object(
         'type','Feature',
         'id',   'map:convenience_store.' || v.objt_id::text,
-        'geometry',   ST_AsGeoJSON(g.geom_3857)::json,
+        'geometry',
+        ST_AsGeoJSON(
+        ST_Transform(ST_SetSRID(ST_MakePoint(v.x, v.y), 4326), 3857)
+        )::json,
         'properties', json_build_object(
         'fclty_nm', v.fclty_nm,
         'adres',    v.adres,
         'rn_adres', v.rn_adres
         )
         )
-        ELSE NULL END AS feature,
+        ELSE NULL
+        END AS feature,
 
         now(), now()
         FROM (
@@ -54,8 +63,8 @@
             #{i.telno},
             #{i.fcltyTy},
             CAST(#{i.dataYr} AS integer),
-            CAST(#{i.x} AS double precision),  -- 입력: 4326 lon(가정)
-            CAST(#{i.y} AS double precision),  -- 입력: 4326 lat(가정)
+            CAST(#{i.x} AS double precision),  -- 입력: 4326 lon
+            CAST(#{i.y} AS double precision),  -- 입력: 4326 lat
             CAST(#{i.rawJson} AS jsonb)
             )
         </foreach>
@@ -63,93 +72,9 @@
         objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
         telno, fclty_ty, data_yr, x, y, raw
         )
-
-        /* ▲ 4326 입력값에 대해
-        1) 정상 범위: (x∈[-180,180] AND y∈[-90,90]) → 그대로 변환
-        2) 뒤집힘 추정: (y∈[-180,180] AND x∈[-90,90]) → swap 후 변환
-        3) 그 외: NULL (해당 레코드 스킵) */
-        CROSS JOIN LATERAL (
-        SELECT CASE
-        WHEN v.x BETWEEN -180 AND 180 AND v.y BETWEEN -90 AND 90 THEN
-        ST_Transform(ST_SetSRID(ST_MakePoint(v.x, v.y), 4326), 3857)
-        WHEN v.y BETWEEN -180 AND 180 AND v.x BETWEEN -90 AND 90 THEN
-        ST_Transform(ST_SetSRID(ST_MakePoint(v.y, v.x), 4326), 3857)
-        ELSE NULL
-        END AS geom_3857
-        ) AS g
-
         LEFT JOIN map.convenience_store cs
         ON cs.objt_id = v.objt_id
         WHERE cs.objt_id IS NULL
-        AND g.geom_3857 IS NOT NULL   <!-- 유효 좌표만 insert -->
     </insert>
-    <!--<insert id="insertConvenienceStore" parameterType="java.util.List">
-        INSERT INTO map.convenience_store
-        (
-            objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
-            telno, fclty_ty, data_yr, x, y, raw,
-            geom,
-            feature,
-            created_at, updated_at
-        )
-        SELECT
-            v.objt_id, v.fclty_cd, v.fclty_nm, v.adres, v.rn_adres, v.sgg_cd, v.emd_cd, v.ctprvn_cd,
-            v.telno, v.fclty_ty, v.data_yr, v.x, v.y, v.raw,
-            CASE
-            WHEN v.x IS NOT NULL AND v.y IS NOT NULL
-            THEN ST_SetSRID(ST_MakePoint(v.x, v.y), 3857)
-            ELSE NULL
-            END AS geom,
 
-            CASE
-            WHEN v.x IS NOT NULL AND v.y IS NOT NULL THEN
-            json_build_object(
-            'type', 'Feature',
-            'id', 'map:convenience_store.' || v.objt_id::text,
-            'geometry',
-            ST_AsGeoJSON(
-            ST_SnapToGrid(
-            ST_Transform(ST_SetSRID(ST_MakePoint(v.x, v.y), 3857), 4326),
-            1e-5, 1e-5
-            ),
-            5
-            )::json,
-            'properties', json_build_object(
-            'fclty_nm', v.fclty_nm,
-            'adres', v.adres,
-            'rn_adres', v.rn_adres
-            )
-            )
-            ELSE NULL
-            END AS feature,
-
-            now(), now()
-        FROM (
-        VALUES
-        <foreach collection="list" item="i" separator=",">
-            (
-            CAST(#{i.objtId} AS bigint),
-            #{i.fcltyCd},
-            #{i.fcltyNm},
-            #{i.adres},
-            #{i.rnAdres},
-            #{i.sggCd},
-            #{i.emdCd},
-            #{i.ctprvnCd},
-            #{i.telno},
-            #{i.fcltyTy},
-            CAST(#{i.dataYr} AS integer),
-            CAST(#{i.x} AS double precision),
-            CAST(#{i.y} AS double precision),
-            CAST(#{i.rawJson} AS jsonb)
-            )
-        </foreach>
-        ) AS v(
-            objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
-            telno, fclty_ty, data_yr, x, y, raw
-        )
-        LEFT JOIN map.convenience_store cs
-        ON cs.objt_id = v.objt_id
-        WHERE cs.objt_id IS NULL
-    </insert>-->
 </mapper>

@@ -29,7 +29,7 @@ public class SafemapSchedulerController {
     }
 
     //@RequestMapping("/store")
-    @Scheduled(cron = "0 38 13 * * *")
+    @Scheduled(cron = "0 20 00 * * *")
     @RequestMapping("/store")
     public void ConvenienceStore() {
         final int pageSize = 2000;
