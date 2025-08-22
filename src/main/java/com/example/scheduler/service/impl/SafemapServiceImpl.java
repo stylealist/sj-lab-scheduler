@@ -40,6 +40,7 @@ public class SafemapServiceImpl implements SafemapService {
                 affected += mapper.insertConvenienceStore(sub);
             }
         }
+        mapper.insertConvenienceStoreGeojson();
         return affected; // 실제 신규 삽입된 건수
     }
 

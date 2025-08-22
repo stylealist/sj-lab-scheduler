@@ -8,4 +8,6 @@ import java.util.List;
 @Mapper
 public interface SafemapMapper {
     int insertConvenienceStore(@Param("list") List<ConvenienceStoreDto> list);
+    void insertConvenienceStoreGeojson();
+
 }
