@@ -8,6 +8,78 @@
         INSERT INTO map.convenience_store
         (
             objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
+            telno, fclty_ty, data_yr,
+            x, y,            -- 3857로 변환된 값 저장
+            raw,
+            geom,            -- EPSG:3857
+            feature,         -- geometry도 3857로 직렬화
+            created_at, updated_at
+        )
+        SELECT
+            v.objt_id, v.fclty_cd, v.fclty_nm, v.adres, v.rn_adres, v.sgg_cd, v.emd_cd, v.ctprvn_cd,
+            v.telno, v.fclty_ty, v.data_yr,
+
+            CASE WHEN g.geom_3857 IS NOT NULL THEN ST_X(g.geom_3857) END AS x,
+            CASE WHEN g.geom_3857 IS NOT NULL THEN ST_Y(g.geom_3857) END AS y,
+
+            v.raw,
+
+            g.geom_3857 AS geom,
+
+            CASE WHEN g.geom_3857 IS NOT NULL THEN
+            json_build_object(
+            'type','Feature',
+            'id',   'map:convenience_store.' || v.objt_id::text,
+            'geometry',   ST_AsGeoJSON(g.geom_3857)::json,
+            'properties', json_build_object(
+            'fclty_nm', v.fclty_nm,
+            'adres',    v.adres,
+            'rn_adres', v.rn_adres
+            )
+            )
+            ELSE NULL END AS feature,
+
+            now(), now()
+        FROM (
+        VALUES
+        <foreach collection="list" item="i" separator=",">
+            (
+            CAST(#{i.objtId} AS bigint),
+            #{i.fcltyCd},
+            #{i.fcltyNm},
+            #{i.adres},
+            #{i.rnAdres},
+            #{i.sggCd},
+            #{i.emdCd},
+            #{i.ctprvnCd},
+            #{i.telno},
+            #{i.fcltyTy},
+            CAST(#{i.dataYr} AS integer),
+            CAST(#{i.x} AS double precision),  -- 입력: 4326 (lon)
+            CAST(#{i.y} AS double precision),  -- 입력: 4326 (lat)
+            CAST(#{i.rawJson} AS jsonb)
+            )
+        </foreach>
+        ) AS v(
+            objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
+            telno, fclty_ty, data_yr, x, y, raw
+        )
+        -- 입력 4326 → 3857로 변환(한 번만 계산)
+        CROSS JOIN LATERAL (
+            SELECT CASE
+            WHEN v.x IS NOT NULL AND v.y IS NOT NULL
+            THEN ST_Transform(ST_SetSRID(ST_MakePoint(v.x, v.y), 4326), 3857)
+            ELSE NULL
+            END AS geom_3857
+        ) AS g
+        LEFT JOIN map.convenience_store cs
+        ON cs.objt_id = v.objt_id
+        WHERE cs.objt_id IS NULL
+    </insert>
+    <!--<insert id="insertConvenienceStore" parameterType="java.util.List">
+        INSERT INTO map.convenience_store
+        (
+            objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
             telno, fclty_ty, data_yr, x, y, raw,
             geom,
             feature,
@@ -72,48 +144,5 @@
         LEFT JOIN map.convenience_store cs
         ON cs.objt_id = v.objt_id
         WHERE cs.objt_id IS NULL
-    </insert>
-
-    <!--<insert id="insertConvenienceStore" parameterType="java.util.List">
-        INSERT INTO map.convenience_store
-        (objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
-        telno, fclty_ty, data_yr, x, y, raw, geom, created_at, updated_at)
-        SELECT
-        v.objt_id, v.fclty_cd, v.fclty_nm, v.adres, v.rn_adres, v.sgg_cd, v.emd_cd, v.ctprvn_cd,
-        v.telno, v.fclty_ty, v.data_yr, v.x, v.y, v.raw,
-        CASE
-        WHEN v.x IS NOT NULL AND v.y IS NOT NULL
-        THEN ST_SetSRID(ST_MakePoint(v.x, v.y), 3857)
-        ELSE NULL
-        END AS geom,
-        now(), now()
-        FROM (
-        VALUES
-        <foreach collection="list" item="i" separator=",">
-            (
-            CAST(#{i.objtId} AS bigint),
-            #{i.fcltyCd},
-            #{i.fcltyNm},
-            #{i.adres},
-            #{i.rnAdres},
-            #{i.sggCd},
-            #{i.emdCd},
-            #{i.ctprvnCd},
-            #{i.telno},
-            #{i.fcltyTy},
-            CAST(#{i.dataYr} AS integer),
-            CAST(#{i.x} AS double precision),
-            CAST(#{i.y} AS double precision),
-            CAST(#{i.rawJson} AS jsonb)
-            )
-        </foreach>
-        ) AS v(
-        objt_id, fclty_cd, fclty_nm, adres, rn_adres, sgg_cd, emd_cd, ctprvn_cd,
-        telno, fclty_ty, data_yr, x, y, raw
-        )
-        LEFT JOIN map.convenience_store cs
-        ON cs.objt_id = v.objt_id
-        WHERE cs.objt_id IS NULL
     </insert>-->
-
 </mapper>
