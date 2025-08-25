@@ -47,26 +47,33 @@
     </insert>
     <insert id="insertConvenienceStoreGeojson">
         CREATE OR REPLACE VIEW map.v_convenience_store_geojson AS
-        WITH feat AS (
+        WITH dedup AS (
+            SELECT DISTINCT ON (x, y)
+            objt_id, fclty_nm, adres, rn_adres, x, y, geom
+            FROM map.convenience_store
+            WHERE geom IS NOT NULL
+            ORDER BY x, y, objt_id DESC         -- 같은 (x,y) 안에서 objt_id가 가장 큰 행 선택
+        ),
+        feat AS (
             SELECT json_build_object(
-                'type','Feature',
-                'id', 'map:convenience_store.' || objt_id::text,
-                'geometry', ST_AsGeoJSON(geom)::json,   -- geom이 3857이면 3857 GeoJSON
-                'properties', json_build_object(
-                'fclty_nm', fclty_nm,
-                'adres',    adres,
-                'rn_adres', rn_adres,
-                'x',        x,
-                'y',        y
-            )
-        ) AS feature
-        FROM map.convenience_store
-        WHERE geom IS NOT NULL
+            'type','Feature',
+            'id',   'map:convenience_store.' || objt_id::text,
+            'geometry',  ST_AsGeoJSON(geom)::json,
+            'properties', json_build_object(
+            'fclty_nm', fclty_nm,
+            'adres',    adres,
+            'rn_adres', rn_adres,
+            'x',        x,
+            'y',        y
         )
-            SELECT json_build_object(
+        ) AS feature
+        FROM dedup
+        )
+        SELECT json_build_object(
             'type','FeatureCollection',
             'features', COALESCE(json_agg(feature), '[]'::json)
         ) AS geojson
         FROM feat
+
     </insert>
 </mapper>
