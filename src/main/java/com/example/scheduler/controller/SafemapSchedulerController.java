@@ -22,6 +22,7 @@ import java.util.Map;
 public class SafemapSchedulerController {
     @Value("${apikey.safe}")
     private String safeServiceKey;
+
     private static SafemapService safemapService;
 
     public SafemapSchedulerController(SafemapService safemapService) {
@@ -30,8 +31,8 @@ public class SafemapSchedulerController {
 
     //@RequestMapping("/store")
     @Scheduled(cron = "0 20 00 * * *")
-    @RequestMapping("/ConvenienceStore")
-    public void ConvenienceStore() {
+    @RequestMapping("/safe-map/convenience-store")
+    public void convenienceStore() {
         final int pageSize = 2000;
         List<Map<String, Object>> totalList = new ArrayList<>();
         try {
