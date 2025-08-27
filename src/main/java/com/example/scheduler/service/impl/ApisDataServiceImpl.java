@@ -27,6 +27,13 @@ public class ApisDataServiceImpl implements ApisDataService {
         mapper.insertApisBusCityInfo(dtos);
         return 0;
     }
+
+    @Override
+    public int insertBusStopLocations(List<Map<String, Object>> item) throws Exception {
+        System.out.println(item);
+        return 0;
+    }
+
     private List<BusCityInfoDto> mapToBusCityDtos(List<Map<String, Object>> items) throws Exception {
         List<BusCityInfoDto> dtos = new ArrayList<>(items.size());
 
