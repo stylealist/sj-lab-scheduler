@@ -1,5 +1,6 @@
 package com.example.scheduler.controller;
 
+import com.example.scheduler.dto.BusCityInfoDto;
 import com.example.scheduler.service.ApisDataService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -35,21 +36,77 @@ public class ApisDataSchedulerController {
     @Scheduled(cron = "0 40 00 * * *")
     @RequestMapping("/apis/bus/busRouteInfo")
     public void busRouteInfo() {
+        final int pageSize = 1000; // TAGO 권장 최대
+        final String cityListBase  = "https://apis.data.go.kr/1613000/BusRouteInfoInqireService/getCtyCodeList";
+        final String routeListBase = "https://apis.data.go.kr/1613000/BusRouteInfoInqireService/getRouteNoList";
+
+        // 이미 인코딩된 키( % 가 포함 )면 그대로, 아니면 한 번만 인코딩
+        String keyParam = apisBusInfoServiceKey.contains("%")
+                ? apisBusInfoServiceKey
+                : URLEncoder.encode(apisBusInfoServiceKey, java.nio.charset.StandardCharsets.UTF_8);
+
         try {
-            // 도시코드 목록 조회
-            StringBuilder cityUrlBuilder = new StringBuilder("http://apis.data.go.kr/1613000/BusRouteInfoInqireService/getCtyCodeList");
-            cityUrlBuilder.append("?serviceKey=").append(apisBusInfoServiceKey);
-            cityUrlBuilder.append("&_type=json");
+            /* 1) 도시코드 목록 수집 */
+            StringBuilder cityUrlBuilder = new StringBuilder(cityListBase)
+                    .append("?serviceKey=").append(keyParam)
+                    .append("&_type=json");
 
-            List<Map<String, Object>> param = busRouteInfoToList(cityUrlBuilder);
+            List<Map<String, Object>> cityItems = busRouteInfoToList(cityUrlBuilder);
+            int insertedCities = apisDataService.insertApisBusCityInfo(cityItems);
+            System.out.println("도시코드 수집/삽입: " + cityItems.size() + " / " + insertedCities);
 
-            int insertApisBusCityInfo = apisDataService.insertApisBusCityInfo(param);
-            System.out.println(param);
-            System.out.println(insertApisBusCityInfo);
+            /* 2) DB에서 도시 목록 조회 */
+            List<BusCityInfoDto> cities = apisDataService.selectApisBusCityInfo();
+
+            /* 3) 도시별 노선번호 목록 전량 페이징 수집 */
+            List<Map<String, Object>> totalBusRouteInfo = new ArrayList<>();
+
+            for (BusCityInfoDto city : cities) {
+                int pageNo = 1;
+                while (true) {
+                    StringBuilder routeUrlBuilder = new StringBuilder(routeListBase)
+                            .append("?serviceKey=").append(keyParam)     // 첫 파라미터는 ?
+                            .append("&pageNo=").append(pageNo)           // 이후는 모두 &
+                            .append("&numOfRows=").append(pageSize)
+                            .append("&cityCode=").append(city.getCityCode())
+                            .append("&_type=json");
+
+                    // 기존 파서 그대로 사용: response/body/items/item → List<Map<String,Object>>
+                    List<Map<String, Object>> pageItems = busRouteInfoToList(routeUrlBuilder);
+
+                    if (pageItems == null || pageItems.isEmpty()) break;
+
+                    // ⚠️ bus_route_info에 city_code / city_name 컬럼을 넣었으므로, 매 항목에 주입
+                    for (Map<String, Object> m : pageItems) {
+                        m.put("citycode", city.getCityCode());
+                        m.put("CITYCODE", city.getCityCode()); // 매핑 헬퍼가 first(...)로 대소문자 모두 보게 했으면 굳이 둘 다는 필요없지만 안전하게
+                        if (city.getCityName() != null) {
+                            m.put("cityname", city.getCityName());
+                            m.put("CITYNAME", city.getCityName());
+                        }
+                    }
+
+                    totalBusRouteInfo.addAll(pageItems);
+
+                    System.out.printf("도시 %s(%s) page=%d 수집누계=%d%n",
+                            city.getCityName(), city.getCityCode(), pageNo, totalBusRouteInfo.size());
+
+                    if (pageItems.size() < pageSize) break; // 마지막 페이지
+                    pageNo++;
+                }
+            }
+
+            System.out.println("총 노선 개수(누계): " + totalBusRouteInfo.size());
+
+            /* 4) DB 적재: 청크 분할 권장 (예: 5000건) */
+            int insertedRoutes = apisDataService.insertApisBusRouteInfo(totalBusRouteInfo);
+            System.out.println("노선 삽입 건수: " + insertedRoutes);
+
         } catch (Exception e) {
-            log.error("busInfo 수집 실패", e);
+            log.error("busRouteInfo 수집 실패", e);
         }
     }
+
     /**
      * 국토교통부_전국 버스 정류장 위치 정보
      */

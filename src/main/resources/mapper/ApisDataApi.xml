@@ -4,7 +4,15 @@
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 <mapper namespace="com.example.scheduler.mapper.ApisDataMapper">
-    <insert id="insertApisBusCityInfo" parameterType="map">
+    <select id="selectApisBusCityInfo" resultType="com.example.scheduler.dto.BusCityInfoDto">
+        select
+            seq                                         as seq,
+            city_code::text                             as cityCode,   -- dto가 string이면 ::text
+            city_name                                   as cityName,
+            to_char(reg_dt, 'yyyy-mm-dd hh24:mi:ss')    as regDt       -- dto가 string이면 ok
+            from map.bus_city_info
+    </select>
+    <insert id="insertApisBusCityInfo" parameterType="com.example.scheduler.dto.BusCityInfoDto">
         INSERT INTO map.bus_city_info (city_code, city_name)
         VALUES
         <foreach collection="list" item="i" separator=",">
@@ -12,4 +20,72 @@
         </foreach>
         ON CONFLICT (city_code, city_name) DO NOTHING
     </insert>
+    <select id="insertApisBusRouteInfo" parameterType="map" resultType="string">
+        INSERT INTO map.bus_route_info
+        (route_id, route_no, route_tp, start_node_nm, end_node_nm, start_vehicle_time, end_vehicle_time, city_code, city_name)
+        VALUES
+        <foreach collection="list" item="i" separator=",">
+            (#{i.routeId}, #{i.routeNo}, #{i.routeTp}, #{i.startNodeNm}, #{i.endNodeNm},
+            #{i.startVehicleTime}, #{i.endVehicleTime},#{i.cityCode}, #{i.cityName})
+        </foreach>
+        ON CONFLICT (route_id) DO NOTHING
+        RETURNING route_id
+    </select>
+    <select id="insertApisBusStopInfo" parameterType="map" resultType="string">
+        INSERT INTO map.bus_stop_info
+        (
+            city_mgmt_name, city_name, city_code, mobile_short_no,
+            stop_name, stop_code, lon, lat, collected_on)
+            SELECT
+            t.city_mgmt_name, t.city_name, t.city_code, t.mobile_short_no,
+            t.stop_name, t.stop_code,
+            -- 입력은 4326 → 저장은 3857(x/y)
+            ST_X(ST_Transform(ST_SetSRID(ST_MakePoint(t.lon, t.lat), 4326), 3857)) AS lon,
+            ST_Y(ST_Transform(ST_SetSRID(ST_MakePoint(t.lon, t.lat), 4326), 3857)) AS lat,
+            t.collected_on
+        FROM (
+            VALUES
+            <foreach collection="list" item="i" separator=",">
+                (#{i.cityMgmtName},
+                #{i.cityName},
+                #{i.cityCode},
+                #{i.mobileShortNo},
+                #{i.stopName},
+                #{i.stopCode},
+                #{i.lon},
+                #{i.lat},
+                #{i.collectedOn})
+            </foreach>
+        ) AS t(city_mgmt_name, city_name, city_code, mobile_short_no,
+        stop_name, stop_code, lon, lat, collected_on)
+        WHERE t.lon BETWEEN -180 AND 180
+        AND t.lat BETWEEN -85.05112878 AND 85.05112878
+        ON CONFLICT (stop_code) DO NOTHING
+        RETURNING stop_code
+    </select>
+    <select id="insertApisBusStopInfoGeoJson">
+        CREATE OR REPLACE VIEW "map".v_bus_stop_info_geojson
+        AS WITH dedup AS (
+            SELECT DISTINCT ON (bus_stop_info.lon, bus_stop_info.lat) bus_stop_info.id,
+            bus_stop_info.city_mgmt_name,
+            bus_stop_info.city_name,
+            bus_stop_info.city_code,
+            bus_stop_info.stop_name,
+            bus_stop_info.stop_code,
+            bus_stop_info.lon,
+            bus_stop_info.lat,
+            bus_stop_info.collected_on,
+            bus_stop_info.geom
+            FROM map.bus_stop_info
+            WHERE bus_stop_info.geom IS NOT NULL
+            ORDER BY bus_stop_info.lon, bus_stop_info.lat, bus_stop_info.id DESC
+        ), feat AS (
+            SELECT json_build_object('type', 'Feature', 'id', 'map:bus_stop_info.'::text || dedup.id::text, 'geometry', st_asgeojson(dedup.geom)::json, 'properties', json_build_object('city_mgmt_name', dedup.city_mgmt_name, 'city_name', dedup.city_name, 'city_code', dedup.city_code, 'stop_name', dedup.stop_name, 'stop_code', dedup.stop_code, 'lon', dedup.lon,'lat', dedup.lat,'collected_on',dedup.collected_on)) AS feature
+            FROM dedup
+        )
+        SELECT json_build_object('type', 'FeatureCollection', 'features', COALESCE(json_agg(feature), '[]'::json)) AS geojson
+        FROM feat
+    </select>
+
+
 </mapper>
