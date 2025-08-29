@@ -45,4 +45,48 @@
         SELECT ST_Transform(ST_SetSRID(ST_MakePoint(#{dto.lonDeg}, #{dto.latDeg}), 4326), 3857) AS geom3857
         ) AS g
     </insert>
+    <insert id="insertCctvInfoJson">
+        CREATE OR REPLACE VIEW map.v_cctv_info_geojson AS
+        WITH dedup AS (
+            SELECT DISTINCT ON (c.coordx, c.coordy)
+            c.id,
+            c.cctv_type,
+            c.cctv_format,
+            c.cctv_name,
+            c.cctv_url,
+            c.cctv_resolution,
+            c.road_section_id,
+            c.file_create_time,
+            c.coordx,
+            c.coordy,
+            c.geom
+            FROM map.cctv_info c
+            WHERE c.geom IS NOT NULL
+            ORDER BY c.coordx, c.coordy, c.id DESC
+        ),
+        feat AS (
+        SELECT json_build_object(
+            'type','Feature',
+            'id',   'map:cctv_info.' || id::text,
+            'geometry',  ST_AsGeoJSON(geom)::json,  -- EPSG:3857
+            'properties', json_build_object(
+            'cctv_type',       cctv_type,
+            'cctv_format',     cctv_format,
+            'cctv_name',       cctv_name,
+            'cctv_url',        cctv_url,
+            'cctv_resolution', cctv_resolution,
+            'road_section_id', road_section_id,
+            'file_create_time', file_create_time,
+            'x', coordx,    -- 3857 X
+            'y', coordy     -- 3857 Y
+        )
+        ) AS feature
+        FROM dedup
+        )
+        SELECT json_build_object(
+            'type','FeatureCollection',
+            'features', COALESCE(json_agg(feature), '[]'::json)
+        ) AS geojson
+        FROM feat
+    </insert>
 </mapper>

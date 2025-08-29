@@ -52,7 +52,7 @@ public class ItsDataServiceImpl implements ItsDataService {
             }
             System.out.println("현재 진행중인 cctv row : " + affected);
         }
-
+        mapper.insertCctvInfoJson();
         log.info("ITS CCTV affected total: {}", affected);
         return affected;
     }

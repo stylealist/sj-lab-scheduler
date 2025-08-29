@@ -23,5 +23,6 @@ public interface ItsDataMapper {
                            @Param("url") String url);
 
     int insertCctvInfoOne(@Param("dto") CctvInfoDto dto);
+    void insertCctvInfoJson();
 
 }
