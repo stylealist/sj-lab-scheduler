@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.scheduler.mapper.ItsDataMapper">
+    <select id="countCctvByKey" resultType="int">
+        SELECT COUNT(1)
+        FROM map.cctv_info
+        WHERE cctv_type = #{type}
+        AND cctv_format = #{format}
+        AND cctv_name = #{name}
+    </select>
+
+    <update id="updateCctvUrlByKey">
+        UPDATE map.cctv_info
+        SET cctv_url = #{url},
+        updated_at = now()
+        WHERE cctv_type = #{type}
+        AND cctv_format = #{format}
+        AND cctv_name = #{name}
+    </update>
+
+    <insert id="insertCctvInfoOne" parameterType="map">
+        INSERT INTO map.cctv_info
+        (coord_type, data_count, road_section_id, file_create_time,
+        cctv_type, cctv_url, cctv_resolution,
+        coordx, coordy,
+        cctv_format, cctv_name)
+        SELECT
+        #{dto.coordType},
+        #{dto.dataCount},
+        #{dto.roadSectionId},
+        CASE WHEN #{dto.fileCreateTime} ~ '^[0-9]{14}$'
+        THEN to_timestamp(#{dto.fileCreateTime}, 'YYYYMMDDHH24MISS')
+        ELSE NULL END,
+        #{dto.cctvType},
+        #{dto.cctvUrl},
+        #{dto.cctvResolution},
+        ST_X(g.geom3857),
+        ST_Y(g.geom3857),
+        #{dto.cctvFormat},
+        #{dto.cctvName}
+        FROM (
+        SELECT ST_Transform(ST_SetSRID(ST_MakePoint(#{dto.lonDeg}, #{dto.latDeg}), 4326), 3857) AS geom3857
+        ) AS g
+    </insert>
+</mapper>

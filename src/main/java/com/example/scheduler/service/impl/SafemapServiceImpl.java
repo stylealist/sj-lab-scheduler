@@ -8,7 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
+import static com.example.scheduler.util.DataTypeUtil.*;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -76,10 +76,5 @@ public class SafemapServiceImpl implements SafemapService {
         return new ArrayList<>(uniq.values());
     }
     // utils
-    private String s(Object o){ return o==null? null : String.valueOf(o).trim(); }
-    private Integer toInt(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:Integer.valueOf(s);}catch(Exception e){return null;}}
-    private Long toLong(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:Long.valueOf(s);}catch(Exception e){return null;}}
-    private BigDecimal toDecimal(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:new BigDecimal(s);}catch(Exception e){return null;}}
-
 
 }

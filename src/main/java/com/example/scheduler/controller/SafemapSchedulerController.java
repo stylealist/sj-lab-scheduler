@@ -29,7 +29,11 @@ public class SafemapSchedulerController {
         this.safemapService = safemapService;
     }
 
-    //@RequestMapping("/store")
+    /**
+     * 생활안전정보에서 전국 편의점 위치 정보 데이터를 DB에 저장하는 기능
+     * 대상 레이어 : (CCTV)
+     * 업데이트 시간 : 매일 00시 20분
+     */
     @Scheduled(cron = "0 20 00 * * *")
     @RequestMapping("/safe-map/convenience-store")
     public void convenienceStore() {

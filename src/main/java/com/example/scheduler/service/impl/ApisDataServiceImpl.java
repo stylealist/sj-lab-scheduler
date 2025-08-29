@@ -9,6 +9,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import static com.example.scheduler.util.DataTypeUtil.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -25,6 +28,7 @@ public class ApisDataServiceImpl implements ApisDataService {
 
 
     @Override
+    @Transactional
     public int insertApisBusCityInfo(List<Map<String, Object>> item) throws Exception {
         List<BusCityInfoDto> dtos = mapToBusCityDtos(item);
 
@@ -33,7 +37,8 @@ public class ApisDataServiceImpl implements ApisDataService {
         System.out.println("Inserted rows: " + inserted);
         return inserted;
     }
-
+    @Override
+    @Transactional
     public int insertApisBusRouteInfo(List<Map<String, Object>> item) throws Exception {
         // 1) Map → DTO
         List<BusRouteInfoDto> dtos = mapToBusRouteDtos(item);
@@ -57,11 +62,13 @@ public class ApisDataServiceImpl implements ApisDataService {
     }
 
     @Override
+    @Transactional
     public List<BusCityInfoDto> selectApisBusCityInfo() throws Exception {
         return mapper.selectApisBusCityInfo();
     }
 
     @Override
+    @Transactional
     public int insertBusStopLocations(List<Map<String, Object>> item) throws Exception {
         // 1) Map → DTO 변환
         List<BusStopInfoDto> dtos = mapToBusStopDtos(item);
@@ -162,63 +169,6 @@ public class ApisDataServiceImpl implements ApisDataService {
                     .build());
         }
         return dtos;
-    }
-
-
-
-    /* ===== Helper methods ===== */
-
-    private static Object first(Map<String, Object> m, String... keys) {
-        for (String k : keys) {
-            Object v = m.get(k);
-            if (v != null) return v;
-        }
-        return null;
-    }
-    private static String s(Object o) {
-        return o == null ? null : String.valueOf(o).trim();
-    }
-    private static boolean isBlank(String str) {
-        return str == null || str.trim().isEmpty();
-    }
-    // Integer 변환
-    private Integer i(Object o) {
-        try { return (o == null) ? null : Integer.parseInt(o.toString()); }
-        catch (Exception e) { return null; }
-    }
-    // Long 변환
-    private Long l(Object o) {
-        try { return (o == null) ? null : Long.parseLong(o.toString()); }
-        catch (Exception e) { return null; }
-    }
-    // Double 변환
-    private Double d(Object o) {
-        try { return (o == null) ? null : Double.parseDouble(o.toString()); }
-        catch (Exception e) { return null; }
-    }
-    // LocalDate 변환
-    private LocalDate toLocalDate(Object o) {
-        try { return (o == null) ? null : LocalDate.parse(o.toString()); }
-        catch (Exception e) { return null; }
-    }
-
-    // LocalDateTime 변환
-    private LocalDateTime toLocalDateTime(Object o) {
-        try { return (o == null) ? null : LocalDateTime.parse(o.toString()); }
-        catch (Exception e) { return null; }
-    }
-
-    /** "540"→"0540", 2315→"2315", "05:40"→"0540" */
-    private static String toHHmm(Object o) {
-        if (o == null) return null;
-        String t = String.valueOf(o).trim();
-        if (t.isEmpty()) return null;
-        // 숫자만 남기기 (콜론/공백 등 제거)
-        t = t.replaceAll("\\D", "");
-        if (t.isEmpty()) return null;
-        if (t.length() > 4) t = t.substring(0, 4);
-        // 왼쪽 0패딩
-        return String.format("%4s", t).replace(' ', '0');
     }
 
 }

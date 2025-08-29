@@ -31,7 +31,9 @@ public class ApisDataSchedulerController {
     }
 
     /**
-     * 국토교통부_(TAGO)_버스노선정보
+     * 공공데이터포털에서 버스노선정보 데이터를 DB에 저장하는 기능
+     * 대상 레이어 : (CCTV)
+     * 업데이트 시간 : 매일 00시 40분
      */
     @Scheduled(cron = "0 40 00 * * *")
     @RequestMapping("/apis/bus/busRouteInfo")
@@ -108,7 +110,9 @@ public class ApisDataSchedulerController {
     }
 
     /**
-     * 국토교통부_전국 버스 정류장 위치 정보
+     * 공공데이터포털에서 전국 버스 정류장 위치 정보 데이터를 DB에 저장하는 기능
+     * 대상 레이어 : (CCTV)
+     * 업데이트 시간 : 매일 01시 00분
      */
     @Scheduled(cron = "0 00 01 * * *")
     @RequestMapping("/apis/bus/busStopLocation")
