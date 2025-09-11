@@ -86,6 +86,289 @@
         SELECT json_build_object('type', 'FeatureCollection', 'features', COALESCE(json_agg(feature), '[]'::json)) AS geojson
         FROM feat
     </select>
-
-
+    <select id="insertPharmacy" parameterType="map" resultType="string">
+        INSERT INTO map.pharmacy
+        (
+        hpid, duty_name, duty_addr, duty_tel1, duty_fax,
+        duty_time1s, duty_time1c, duty_time2s, duty_time2c,
+        duty_time3s, duty_time3c, duty_time4s, duty_time4c,
+        duty_time5s, duty_time5c, duty_time6s, duty_time6c,
+        wgs84_lon, wgs84_lat, post_cdn1, post_cdn2, rnum, collected_on
+        )
+        SELECT
+        t.hpid, t.duty_name, t.duty_addr, t.duty_tel1, t.duty_fax,
+        t.duty_time1s, t.duty_time1c, t.duty_time2s, t.duty_time2c,
+        t.duty_time3s, t.duty_time3c, t.duty_time4s, t.duty_time4c,
+        t.duty_time5s, t.duty_time5c, t.duty_time6s, t.duty_time6c,
+        ST_X(ST_Transform(ST_SetSRID(ST_MakePoint(t.wgs84_lon, t.wgs84_lat), 4326), 3857)) AS wgs84_lon,
+        ST_Y(ST_Transform(ST_SetSRID(ST_MakePoint(t.wgs84_lon, t.wgs84_lat), 4326), 3857)) AS wgs84_lat,
+        t.post_cdn1, t.post_cdn2, t.rnum,
+        CASE
+        WHEN t.collected_on IS NULL THEN CURRENT_DATE
+        ELSE t.collected_on::DATE
+        END AS collected_on
+        FROM (
+        VALUES
+        <foreach collection="list" item="i" separator=",">
+            (#{i.hpid},
+            #{i.dutyName},
+            #{i.dutyAddr},
+            #{i.dutyTel1},
+            #{i.dutyFax},
+            #{i.dutyTime1s},
+            #{i.dutyTime1c},
+            #{i.dutyTime2s},
+            #{i.dutyTime2c},
+            #{i.dutyTime3s},
+            #{i.dutyTime3c},
+            #{i.dutyTime4s},
+            #{i.dutyTime4c},
+            #{i.dutyTime5s},
+            #{i.dutyTime5c},
+            #{i.dutyTime6s},
+            #{i.dutyTime6c},
+            #{i.wgs84Lon},
+            #{i.wgs84Lat},
+            #{i.postCdn1},
+            #{i.postCdn2},
+            #{i.rnum},
+            #{i.collectedOn})
+        </foreach>
+        ) AS t(hpid, duty_name, duty_addr, duty_tel1, duty_fax,
+        duty_time1s, duty_time1c, duty_time2s, duty_time2c,
+        duty_time3s, duty_time3c, duty_time4s, duty_time4c,
+        duty_time5s, duty_time5c, duty_time6s, duty_time6c,
+        wgs84_lon, wgs84_lat, post_cdn1, post_cdn2, rnum, collected_on)
+        WHERE t.wgs84_lon BETWEEN -180 AND 180
+        AND t.wgs84_lat BETWEEN -85.05112878 AND 85.05112878
+        AND t.hpid IS NOT NULL
+        ON CONFLICT (hpid) DO NOTHING
+        RETURNING hpid
+    </select>
+    <select id="insertApisPharmacyInfoGeoJson">
+        CREATE OR REPLACE VIEW "map".v_pharmacy_info_geojson
+        AS WITH dedup AS (
+            SELECT DISTINCT ON (pharmacy.wgs84_lon, pharmacy.wgs84_lat) pharmacy.id,
+            pharmacy.hpid,
+            pharmacy.duty_name,
+            pharmacy.duty_addr,
+            pharmacy.duty_tel1,
+            pharmacy.duty_fax,
+            pharmacy.duty_time1s,
+            pharmacy.duty_time1c,
+            pharmacy.duty_time2s,
+            pharmacy.duty_time2c,
+            pharmacy.duty_time3s,
+            pharmacy.duty_time3c,
+            pharmacy.duty_time4s,
+            pharmacy.duty_time4c,
+            pharmacy.duty_time5s,
+            pharmacy.duty_time5c,
+            pharmacy.duty_time6s,
+            pharmacy.duty_time6c,
+            pharmacy.wgs84_lon,
+            pharmacy.wgs84_lat,
+            pharmacy.post_cdn1,
+            pharmacy.post_cdn2,
+            pharmacy.collected_on,
+            ST_SetSRID(ST_MakePoint(
+            ST_X(ST_Transform(ST_SetSRID(ST_MakePoint(pharmacy.wgs84_lon, pharmacy.wgs84_lat), 3857), 4326)),
+            ST_Y(ST_Transform(ST_SetSRID(ST_MakePoint(pharmacy.wgs84_lon, pharmacy.wgs84_lat), 3857), 4326))
+        ), 4326) AS geom
+            FROM map.pharmacy
+            WHERE pharmacy.wgs84_lon IS NOT NULL AND pharmacy.wgs84_lat IS NOT NULL
+            ORDER BY pharmacy.wgs84_lon, pharmacy.wgs84_lat, pharmacy.id DESC
+        ), feat AS (
+            SELECT json_build_object(
+            'type', 'Feature',
+            'id', 'map:pharmacy.'::text || dedup.id::text,
+            'geometry', st_asgeojson(dedup.geom)::json,
+            'properties', json_build_object(
+            'hpid', dedup.hpid,
+            'duty_name', dedup.duty_name,
+            'duty_addr', dedup.duty_addr,
+            'duty_tel1', dedup.duty_tel1,
+            'duty_fax', dedup.duty_fax,
+            'duty_time1s', dedup.duty_time1s,
+            'duty_time1c', dedup.duty_time1c,
+            'duty_time2s', dedup.duty_time2s,
+            'duty_time2c', dedup.duty_time2c,
+            'duty_time3s', dedup.duty_time3s,
+            'duty_time3c', dedup.duty_time3c,
+            'duty_time4s', dedup.duty_time4s,
+            'duty_time4c', dedup.duty_time4c,
+            'duty_time5s', dedup.duty_time5s,
+            'duty_time5c', dedup.duty_time5c,
+            'duty_time6s', dedup.duty_time6s,
+            'duty_time6c', dedup.duty_time6c,
+            'wgs84_lon', dedup.wgs84_lon,
+            'wgs84_lat', dedup.wgs84_lat,
+            'post_cdn1', dedup.post_cdn1,
+            'post_cdn2', dedup.post_cdn2,
+            'collected_on', dedup.collected_on
+        )
+        ) AS feature
+            FROM dedup
+        )
+            SELECT json_build_object(
+            'type', 'FeatureCollection',
+            'features', COALESCE(json_agg(feature), '[]'::json)
+        ) AS geojson
+        FROM feat
+    </select>
+    <select id="insertHospital" parameterType="map" resultType="string">
+        INSERT INTO map.hospital
+        (
+            hpid, duty_name, duty_addr, duty_tel1,
+            duty_div, duty_div_nam, duty_emcls, duty_emcls_name, duty_eryn,
+            duty_time1s, duty_time1c, duty_time2s, duty_time2c,
+            duty_time3s, duty_time3c, duty_time4s, duty_time4c,
+            duty_time5s, duty_time5c, duty_time6s, duty_time6c,
+            duty_time7s, duty_time7c,
+            wgs84_lon, wgs84_lat, post_cdn1, post_cdn2, rnum, collected_on
+        )
+        SELECT
+            t.hpid, t.duty_name, t.duty_addr, t.duty_tel1,
+            t.duty_div, t.duty_div_nam, t.duty_emcls, t.duty_emcls_name, t.duty_eryn,
+            t.duty_time1s, t.duty_time1c, t.duty_time2s, t.duty_time2c,
+            t.duty_time3s, t.duty_time3c, t.duty_time4s, t.duty_time4c,
+            t.duty_time5s, t.duty_time5c, t.duty_time6s, t.duty_time6c,
+            t.duty_time7s, t.duty_time7c,
+            -- 입력은 4326 → 저장은 3857(x/y)
+            ST_X(ST_Transform(ST_SetSRID(ST_MakePoint(t.wgs84_lon, t.wgs84_lat), 4326), 3857)) AS wgs84_lon,
+            ST_Y(ST_Transform(ST_SetSRID(ST_MakePoint(t.wgs84_lon, t.wgs84_lat), 4326), 3857)) AS wgs84_lat,
+            t.post_cdn1, t.post_cdn2, t.rnum,
+            CASE
+            WHEN t.collected_on IS NULL THEN CURRENT_DATE
+            ELSE t.collected_on::DATE
+            END AS collected_on
+        FROM (
+            VALUES
+            <foreach collection="list" item="i" separator=",">
+                (#{i.hpid},
+                #{i.dutyName},
+                #{i.dutyAddr},
+                #{i.dutyTel1},
+                #{i.dutyDiv},
+                #{i.dutyDivNam},
+                #{i.dutyEmcls},
+                #{i.dutyEmclsName},
+                #{i.dutyEryn},
+                #{i.dutyTime1s},
+                #{i.dutyTime1c},
+                #{i.dutyTime2s},
+                #{i.dutyTime2c},
+                #{i.dutyTime3s},
+                #{i.dutyTime3c},
+                #{i.dutyTime4s},
+                #{i.dutyTime4c},
+                #{i.dutyTime5s},
+                #{i.dutyTime5c},
+                #{i.dutyTime6s},
+                #{i.dutyTime6c},
+                #{i.dutyTime7s},
+                #{i.dutyTime7c},
+                #{i.wgs84Lon},
+                #{i.wgs84Lat},
+                #{i.postCdn1},
+                #{i.postCdn2},
+                #{i.rnum},
+                #{i.collectedOn})
+            </foreach>
+        ) AS t(hpid, duty_name, duty_addr, duty_tel1,
+        duty_div, duty_div_nam, duty_emcls, duty_emcls_name, duty_eryn,
+        duty_time1s, duty_time1c, duty_time2s, duty_time2c,
+        duty_time3s, duty_time3c, duty_time4s, duty_time4c,
+        duty_time5s, duty_time5c, duty_time6s, duty_time6c,
+        duty_time7s, duty_time7c,
+        wgs84_lon, wgs84_lat, post_cdn1, post_cdn2, rnum, collected_on)
+        WHERE t.wgs84_lon BETWEEN -180 AND 180
+        AND t.wgs84_lat BETWEEN -85.05112878 AND 85.05112878
+        AND t.hpid IS NOT NULL
+        ON CONFLICT (hpid) DO NOTHING
+        RETURNING hpid
+    </select>
+    <select id="insertApisHospitalInfoGeoJson">
+        CREATE OR REPLACE VIEW "map".v_hospital_info_geojson
+        AS WITH dedup AS (
+            SELECT DISTINCT ON (hospital.wgs84_lon, hospital.wgs84_lat) hospital.id,
+            hospital.hpid,
+            hospital.duty_name,
+            hospital.duty_addr,
+            hospital.duty_tel1,
+            hospital.duty_div,
+            hospital.duty_div_nam,
+            hospital.duty_emcls,
+            hospital.duty_emcls_name,
+            hospital.duty_eryn,
+            hospital.duty_time1s,
+            hospital.duty_time1c,
+            hospital.duty_time2s,
+            hospital.duty_time2c,
+            hospital.duty_time3s,
+            hospital.duty_time3c,
+            hospital.duty_time4s,
+            hospital.duty_time4c,
+            hospital.duty_time5s,
+            hospital.duty_time5c,
+            hospital.duty_time6s,
+            hospital.duty_time6c,
+            hospital.duty_time7s,
+            hospital.duty_time7c,
+            hospital.wgs84_lon,
+            hospital.wgs84_lat,
+            hospital.post_cdn1,
+            hospital.post_cdn2,
+            hospital.collected_on,
+            ST_SetSRID(ST_MakePoint(
+            ST_X(ST_Transform(ST_SetSRID(ST_MakePoint(hospital.wgs84_lon, hospital.wgs84_lat), 3857), 4326)),
+            ST_Y(ST_Transform(ST_SetSRID(ST_MakePoint(hospital.wgs84_lon, hospital.wgs84_lat), 3857), 4326))
+        ), 4326) AS geom
+            FROM map.hospital
+            WHERE hospital.wgs84_lon IS NOT NULL AND hospital.wgs84_lat IS NOT NULL
+            ORDER BY hospital.wgs84_lon, hospital.wgs84_lat, hospital.id DESC
+        ), feat AS (
+        SELECT json_build_object(
+            'type', 'Feature',
+            'id', 'map:hospital.'::text || dedup.id::text,
+            'geometry', st_asgeojson(dedup.geom)::json,
+            'properties', json_build_object(
+            'hpid', dedup.hpid,
+            'duty_name', dedup.duty_name,
+            'duty_addr', dedup.duty_addr,
+            'duty_tel1', dedup.duty_tel1,
+            'duty_div', dedup.duty_div,
+            'duty_div_nam', dedup.duty_div_nam,
+            'duty_emcls', dedup.duty_emcls,
+            'duty_emcls_name', dedup.duty_emcls_name,
+            'duty_eryn', dedup.duty_eryn,
+            'duty_time1s', dedup.duty_time1s,
+            'duty_time1c', dedup.duty_time1c,
+            'duty_time2s', dedup.duty_time2s,
+            'duty_time2c', dedup.duty_time2c,
+            'duty_time3s', dedup.duty_time3s,
+            'duty_time3c', dedup.duty_time3c,
+            'duty_time4s', dedup.duty_time4s,
+            'duty_time4c', dedup.duty_time4c,
+            'duty_time5s', dedup.duty_time5s,
+            'duty_time5c', dedup.duty_time5c,
+            'duty_time6s', dedup.duty_time6s,
+            'duty_time6c', dedup.duty_time6c,
+            'duty_time7s', dedup.duty_time7s,
+            'duty_time7c', dedup.duty_time7c,
+            'wgs84_lon', dedup.wgs84_lon,
+            'wgs84_lat', dedup.wgs84_lat,
+            'post_cdn1', dedup.post_cdn1,
+            'post_cdn2', dedup.post_cdn2,
+            'collected_on', dedup.collected_on
+        )
+        ) AS feature
+            FROM dedup
+        )
+        SELECT json_build_object(
+            'type', 'FeatureCollection',
+            'features', COALESCE(json_agg(feature), '[]'::json)
+        ) AS geojson
+        FROM feat
+    </select>
 </mapper>

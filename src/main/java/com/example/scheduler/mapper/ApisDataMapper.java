@@ -1,9 +1,6 @@
 package com.example.scheduler.mapper;
 
-import com.example.scheduler.dto.BusCityInfoDto;
-import com.example.scheduler.dto.BusRouteInfoDto;
-import com.example.scheduler.dto.BusStopInfoDto;
-import com.example.scheduler.dto.ConvenienceStoreDto;
+import com.example.scheduler.dto.*;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -16,5 +13,11 @@ public interface ApisDataMapper {
     List<BusCityInfoDto> selectApisBusCityInfo();
     List<String> insertApisBusStopInfo(@Param("list") List<BusStopInfoDto> list);
     void insertApisBusStopInfoGeoJson();
+    List<String> insertPharmacy(@Param("list") List<PharmacyInfoDto> list);
+    void insertApisPharmacyInfoGeoJson();
+    List<String> insertHospital(@Param("list") List<HospitalInfoDto> list);
+    void insertApisHospitalInfoGeoJson();
+
+
 
 }

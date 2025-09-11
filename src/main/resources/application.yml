@@ -37,7 +37,6 @@ management:
 
 apikey:  # 외부 연동 API 키 모음
   safe: ISGUSHVA-ISGU-ISGU-ISGU-ISGUSHVA5T  # 생활안전정보 API
-  apis: # 공공 데이터포털
-    busInfo: o9zW2lZLR06hqlpgGQSjOTtf3jfGdFdrtrxwBM%2FshNmdqU%2Btzasq46ZYQasDYVW43Bs%2BxAXwgmBdxYjH5NLE4Q%3D%3D # 국토교통부_(TAGO)_버스노선정보
-    busStopLocation: o9zW2lZLR06hqlpgGQSjOTtf3jfGdFdrtrxwBM/shNmdqU+tzasq46ZYQasDYVW43Bs+xAXwgmBdxYjH5NLE4Q==
+  apis: o9zW2lZLR06hqlpgGQSjOTtf3jfGdFdrtrxwBM/shNmdqU+tzasq46ZYQasDYVW43Bs+xAXwgmBdxYjH5NLE4Q==
+
   its: 7f94df5228ec4eadb1fb9772aad72d70

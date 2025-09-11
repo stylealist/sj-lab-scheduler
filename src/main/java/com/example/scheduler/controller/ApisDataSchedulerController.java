@@ -9,9 +9,18 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXParseException;
 
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
@@ -21,10 +30,8 @@ import java.util.*;
 @Slf4j
 @RestController
 public class ApisDataSchedulerController {
-    @Value("${apikey.apis.busInfo}")
-    private String apisBusInfoServiceKey;
-    @Value("${apikey.apis.busStopLocation}")
-    private String busStopLocationServiceKey;
+    @Value("${apikey.apis}")
+    private String apisServiceKey;
     private static ApisDataService apisDataService;
     public ApisDataSchedulerController(ApisDataService apisDataService) {
         this.apisDataService = apisDataService;
@@ -43,9 +50,9 @@ public class ApisDataSchedulerController {
         final String routeListBase = "https://apis.data.go.kr/1613000/BusRouteInfoInqireService/getRouteNoList";
 
         // 이미 인코딩된 키( % 가 포함 )면 그대로, 아니면 한 번만 인코딩
-        String keyParam = apisBusInfoServiceKey.contains("%")
-                ? apisBusInfoServiceKey
-                : URLEncoder.encode(apisBusInfoServiceKey, java.nio.charset.StandardCharsets.UTF_8);
+        String keyParam = apisServiceKey.contains("%")
+                ? apisServiceKey
+                : URLEncoder.encode(apisServiceKey, java.nio.charset.StandardCharsets.UTF_8);
 
         try {
             /* 1) 도시코드 목록 수집 */
@@ -110,6 +117,238 @@ public class ApisDataSchedulerController {
     }
 
     /**
+     * 공공데이터포털에서 전국 약국 정보 데이터를 DB에 저장하는 기능
+     * 대상 레이어 : (약국)
+     * 업데이트 시간 : 매일 01시 20분
+     */
+    @Scheduled(cron = "0 20 01 * * *")
+    @RequestMapping("/apis/amenities/pharmacy")
+    public void pharmacy() {
+        final int requestPerPage = 10000; // 요청할 페이지당 건수
+        final String base = "https://apis.data.go.kr/B552657/ErmctInsttInfoInqireService/getParmacyFullDown";
+
+        List<Map<String, Object>> totalData = new ArrayList<>();
+        try {
+            // 1) 첫 페이지 요청
+            StringBuilder first = new StringBuilder(base)
+                    .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                    .append("&pageNo=1")
+                    .append("&numOfRows=").append(requestPerPage);
+
+            Map<String, Object> page1Response = xmlToList(first);
+            if (page1Response == null || page1Response.isEmpty()) {
+                log.warn("약국 API 첫 페이지 응답이 비어 있습니다.");
+                return;
+            }
+
+            // XML 응답에서 메타 정보 추출
+            Map<String, Object> body = (Map<String, Object>) page1Response.get("body");
+            if (body == null) {
+                log.warn("응답에서 body를 찾을 수 없습니다.");
+                return;
+            }
+
+            int totalCount = toInt(body.get("totalCount"));
+            int numOfRows = toInt(body.get("numOfRows")); // 실제 요청된 페이지 크기
+
+            // items에서 실제 데이터 추출
+            Map<String, Object> items = (Map<String, Object>) body.get("items");
+            List<Map<String, Object>> data1 = new ArrayList<>();
+
+            if (items != null) {
+                Object itemData = items.get("item");
+                if (itemData instanceof List) {
+                    data1 = (List<Map<String, Object>>) itemData;
+                } else if (itemData instanceof Map) {
+                    // item이 하나만 있는 경우
+                    data1.add((Map<String, Object>) itemData);
+                }
+            }
+
+            totalData.addAll(data1);
+
+            // 실제 페이지당 건수 계산 (fallback 로직)
+            int respPerPage = numOfRows > 0 ? numOfRows : data1.size();
+            if (respPerPage <= 0) respPerPage = requestPerPage; // 최종 fallback
+
+            int totalPages = (int) Math.ceil((double) totalCount / respPerPage);
+
+            log.info("약국 데이터 수집 시작 - 총 {}건, 예상 {}페이지 (첫 페이지: {}건 수집)",
+                    totalCount, totalPages, data1.size());
+            log.info("누계: {} / 총 {} (page=1, currentCount={}, respPerPage={})",
+                    totalData.size(), totalCount, data1.size(), respPerPage);
+
+            // 2) 2페이지부터 마지막 페이지까지 수집
+            for (int currentPageNo = 2; currentPageNo <= totalPages; currentPageNo++) {
+                StringBuilder urlBuilder = new StringBuilder(base)
+                        .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                        .append("&pageNo=").append(currentPageNo)
+                        .append("&numOfRows=").append(requestPerPage);
+
+                Map<String, Object> pageNResponse = xmlToList(urlBuilder);
+                if (pageNResponse == null || pageNResponse.isEmpty()) {
+                    log.warn("페이지 {}의 응답이 비어 있습니다. 수집을 중단합니다.", currentPageNo);
+                    break;
+                }
+                // 응답에서 데이터 추출
+                Map<String, Object> pageBody = (Map<String, Object>) pageNResponse.get("body");
+                if (pageBody == null) {
+                    log.warn("페이지 {}에서 body를 찾을 수 없습니다.", currentPageNo);
+                    break;
+                }
+                Map<String, Object> pageItems = (Map<String, Object>) pageBody.get("items");
+                List<Map<String, Object>> dataN = new ArrayList<>();
+
+                if (pageItems != null) {
+                    Object itemData = pageItems.get("item");
+                    if (itemData instanceof List) {
+                        dataN = (List<Map<String, Object>>) itemData;
+                    } else if (itemData instanceof Map) {
+                        dataN.add((Map<String, Object>) itemData);
+                    }
+                }
+
+                totalData.addAll(dataN);
+
+                log.info("누계: {} / 총 {} (page={}, currentCount={})",
+                        totalData.size(), totalCount, currentPageNo, dataN.size());
+
+                // API 호출 제한을 고려한 대기 시간 (선택사항)
+                try {
+                    Thread.sleep(100); // 100ms 대기
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            log.info("약국 데이터 수집 완료 - 총 {}건 수집", totalData.size());
+
+            System.out.println(totalData);
+
+            int inserted = apisDataService.insertPharmacy(totalData);
+        } catch (Exception e) {
+            log.error("약국 정보 수집 실패", e);
+            throw new RuntimeException("약국 API 데이터 수집 중 오류 발생", e);
+        }
+    }
+
+    /**
+     * 공공데이터포털에서 전국 병원 정보 데이터를 DB에 저장하는 기능
+     * 대상 레이어 : (병원)
+     * 업데이트 시간 : 매일 01시 40분
+     */
+    @Scheduled(cron = "0 40 01 * * *")
+    @RequestMapping("/apis/amenities/hospital")
+    public void hospital() {
+        final int requestPerPage = 10000; // 요청할 페이지당 건수
+        final String base = "https://apis.data.go.kr/B552657/HsptlAsembySearchService/getHsptlMdcncFullDown";
+
+        List<Map<String, Object>> totalData = new ArrayList<>();
+        try {
+            // 1) 첫 페이지 요청
+            StringBuilder first = new StringBuilder(base)
+                    .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                    .append("&pageNo=1")
+                    .append("&numOfRows=").append(requestPerPage);
+
+            Map<String, Object> page1Response = xmlToList(first);
+            if (page1Response == null || page1Response.isEmpty()) {
+                log.warn("병원 API 첫 페이지 응답이 비어 있습니다.");
+                return;
+            }
+
+            // XML 응답에서 메타 정보 추출
+            Map<String, Object> body = (Map<String, Object>) page1Response.get("body");
+            if (body == null) {
+                log.warn("응답에서 body를 찾을 수 없습니다.");
+                return;
+            }
+
+            int totalCount = toInt(body.get("totalCount"));
+            int numOfRows = toInt(body.get("numOfRows")); // 실제 요청된 페이지 크기
+
+            // items에서 실제 데이터 추출
+            Map<String, Object> items = (Map<String, Object>) body.get("items");
+            List<Map<String, Object>> data1 = new ArrayList<>();
+
+            if (items != null) {
+                Object itemData = items.get("item");
+                if (itemData instanceof List) {
+                    data1 = (List<Map<String, Object>>) itemData;
+                } else if (itemData instanceof Map) {
+                    // item이 하나만 있는 경우
+                    data1.add((Map<String, Object>) itemData);
+                }
+            }
+
+            totalData.addAll(data1);
+
+            // 실제 페이지당 건수 계산 (fallback 로직)
+            int respPerPage = numOfRows > 0 ? numOfRows : data1.size();
+            if (respPerPage <= 0) respPerPage = requestPerPage; // 최종 fallback
+
+            int totalPages = (int) Math.ceil((double) totalCount / respPerPage);
+
+            log.info("병원 데이터 수집 시작 - 총 {}건, 예상 {}페이지 (첫 페이지: {}건 수집)",
+                    totalCount, totalPages, data1.size());
+            log.info("누계: {} / 총 {} (page=1, currentCount={}, respPerPage={})",
+                    totalData.size(), totalCount, data1.size(), respPerPage);
+
+            // 2) 2페이지부터 마지막 페이지까지 수집
+            for (int currentPageNo = 2; currentPageNo <= totalPages; currentPageNo++) {
+                StringBuilder urlBuilder = new StringBuilder(base)
+                        .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                        .append("&pageNo=").append(currentPageNo)
+                        .append("&numOfRows=").append(requestPerPage);
+
+                Map<String, Object> pageNResponse = xmlToList(urlBuilder);
+                if (pageNResponse == null || pageNResponse.isEmpty()) {
+                    log.warn("페이지 {}의 응답이 비어 있습니다. 수집을 중단합니다.", currentPageNo);
+                    break;
+                }
+                // 응답에서 데이터 추출
+                Map<String, Object> pageBody = (Map<String, Object>) pageNResponse.get("body");
+                if (pageBody == null) {
+                    log.warn("페이지 {}에서 body를 찾을 수 없습니다.", currentPageNo);
+                    break;
+                }
+                Map<String, Object> pageItems = (Map<String, Object>) pageBody.get("items");
+                List<Map<String, Object>> dataN = new ArrayList<>();
+
+                if (pageItems != null) {
+                    Object itemData = pageItems.get("item");
+                    if (itemData instanceof List) {
+                        dataN = (List<Map<String, Object>>) itemData;
+                    } else if (itemData instanceof Map) {
+                        dataN.add((Map<String, Object>) itemData);
+                    }
+                }
+
+                totalData.addAll(dataN);
+
+                log.info("누계: {} / 총 {} (page={}, currentCount={})",
+                        totalData.size(), totalCount, currentPageNo, dataN.size());
+
+                // API 호출 제한을 고려한 대기 시간 (선택사항)
+                try {
+                    Thread.sleep(100); // 100ms 대기
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            log.info("병원 데이터 수집 완료 - 총 {}건 수집", totalData.size());
+
+            System.out.println(totalData);
+
+            int inserted = apisDataService.insertHospital(totalData);
+        } catch (Exception e) {
+            log.error("병원 정보 수집 실패", e);
+            throw new RuntimeException("병원 API 데이터 수집 중 오류 발생", e);
+        }
+    }
+
+    /**
      * 공공데이터포털에서 전국 버스 정류장 위치 정보 데이터를 DB에 저장하는 기능
      * 대상 레이어 : (CCTV)
      * 업데이트 시간 : 매일 01시 00분
@@ -124,7 +363,7 @@ public class ApisDataSchedulerController {
         try {
             // 1) 첫 페이지
             StringBuilder first = new StringBuilder(base)
-                    .append("?serviceKey=").append(URLEncoder.encode(busStopLocationServiceKey, "UTF-8"))
+                    .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
                     .append("&page=1")
                     .append("&perPage=").append(requestPerPage)
                     .append("&returnType=json");
@@ -153,7 +392,7 @@ public class ApisDataSchedulerController {
             // 2) 2 ~ totalPages
             for (int pageNo = 2; pageNo <= totalPages; pageNo++) {
                 StringBuilder urlBuilder = new StringBuilder(base)
-                        .append("?serviceKey=").append(URLEncoder.encode(busStopLocationServiceKey, "UTF-8"))
+                        .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
                         .append("&page=").append(pageNo)
                         .append("&perPage=").append(requestPerPage) // 요청은 1000으로 고정
                         .append("&returnType=json");
@@ -170,17 +409,15 @@ public class ApisDataSchedulerController {
                 log.info("누계: {} / 총 {} (page={}, currentCount={})",
                         totalData.size(), totalCount, pageNo, toInt(pageN.get("currentCount")));
             }
-            System.out.println(totalData);
 
             // 대량이면 여기서 바로 INSERT 말고, 청크(예: 5000개) 단위로 배치 INSERT 권장
-             int inserted = apisDataService.insertBusStopLocations(totalData);
+            int inserted = apisDataService.insertBusStopLocations(totalData);
             // log.info("총 수집: {}건, 삽입: {}건", total.size(), inserted);
 
         } catch (Exception e) {
             log.error("busInfo 수집 실패", e);
         }
     }
-
 
     private static List<Map<String, Object>> busRouteInfoToList(StringBuilder urlBuilder){
         List<Map<String, Object>> resultData = new ArrayList<>();
@@ -246,6 +483,132 @@ public class ApisDataSchedulerController {
         Object data = page.get("data");
         if (data instanceof List) return ((List<?>) data).size();
         return 0;
+    }
+
+    private Map<String, Object> xmlToList(StringBuilder urlBuilder) {
+        Map<String, Object> resultData = new HashMap<>();
+        try {
+            System.out.println("Request URL: " + urlBuilder.toString());
+
+            URI uri = new URI(urlBuilder.toString());
+            URL url = uri.toURL();
+
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Accept", "application/xml");
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0");
+            connection.connect();
+
+            int responseCode = connection.getResponseCode();
+            if (responseCode != 200) {
+                log.error("API 호출 실패. Response Code: {}", responseCode);
+                return resultData;
+            }
+
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(connection.getInputStream(), "UTF-8"));
+
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            reader.close();
+
+            String xmlString = sb.toString();
+
+            // XML 파싱하여 Map 구조로 변환
+            resultData = parseXmlToMap(xmlString);
+
+        } catch (Exception e) {
+            log.error("XML 데이터 수집 중 오류 발생: {}", e.getMessage(), e);
+        }
+        return resultData;
+    }
+
+    /**
+     * XML을 Map으로 변환하는 메서드
+     */
+    private Map<String, Object> parseXmlToMap(String xmlString) {
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document document = builder.parse(new InputSource(new StringReader(xmlString)));
+
+            Element root = document.getDocumentElement();
+            return elementToMap(root);
+
+        } catch (Exception e) {
+            log.error("XML 파싱 중 오류 발생: {}", e.getMessage(), e);
+            return new HashMap<>();
+        }
+    }
+
+    /**
+     * Element를 Map으로 변환 (재귀 처리)
+     */
+    private Map<String, Object> elementToMap(Element element) {
+        Map<String, Object> map = new LinkedHashMap<>();
+
+        NodeList children = element.getChildNodes();
+
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+
+            if (child.getNodeType() == Node.ELEMENT_NODE) {
+                Element childElement = (Element) child;
+                String key = childElement.getTagName();
+
+                // 자식 엘리먼트가 있는지 확인
+                if (hasElementChildren(childElement)) {
+                    // 중첩 구조 처리
+                    Object existingValue = map.get(key);
+                    Map<String, Object> childMap = elementToMap(childElement);
+
+                    if (existingValue == null) {
+                        map.put(key, childMap);
+                    } else if (existingValue instanceof List) {
+                        ((List<Object>) existingValue).add(childMap);
+                    } else {
+                        List<Object> list = new ArrayList<>();
+                        list.add(existingValue);
+                        list.add(childMap);
+                        map.put(key, list);
+                    }
+                } else {
+                    // 텍스트 값 처리
+                    String textContent = childElement.getTextContent().trim();
+                    if (!textContent.isEmpty()) {
+                        Object existingValue = map.get(key);
+                        if (existingValue == null) {
+                            map.put(key, textContent);
+                        } else if (existingValue instanceof List) {
+                            ((List<Object>) existingValue).add(textContent);
+                        } else {
+                            List<Object> list = new ArrayList<>();
+                            list.add(existingValue);
+                            list.add(textContent);
+                            map.put(key, list);
+                        }
+                    }
+                }
+            }
+        }
+
+        return map;
+    }
+
+    /**
+     * Element가 자식 Element를 가지고 있는지 확인
+     */
+    private boolean hasElementChildren(Element element) {
+        NodeList children = element.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (children.item(i).getNodeType() == Node.ELEMENT_NODE) {
+                return true;
+            }
+        }
+        return false;
     }
 
 }
