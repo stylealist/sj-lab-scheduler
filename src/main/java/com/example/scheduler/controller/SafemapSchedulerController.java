@@ -71,6 +71,49 @@ public class SafemapSchedulerController {
             log.error("Safemap 수집 실패", e);
         }
     }
+    /**
+     * 생활안전정보에서 전국 관공서 위치 정보 데이터를 DB에 저장하는 기능
+     * 대상 레이어 : (관공서)
+     * 업데이트 시간 : 매일 02시 00분
+     */
+    @Scheduled(cron = "0 00 02 * * *")
+    @RequestMapping("/safe-map/government-office")
+    public void governmentOffice() {
+        final int pageSize = 2000;
+        List<Map<String, Object>> totalList = new ArrayList<>();
+        try {
+            String url = "http://safemap.go.kr/openApiService/data/getPublicInstitutionsData.do"
+                    + "?" + URLEncoder.encode("serviceKey","UTF-8") + "=" + URLEncoder.encode(safeServiceKey, "UTF-8") // 값도 인코딩!
+                    + "&" + URLEncoder.encode("numOfRows","UTF-8") + "=" + pageSize
+                    + "&" + URLEncoder.encode("Fclty_Cd","UTF-8") + "=501010"
+                    + "&" + URLEncoder.encode("dataType","UTF-8") + "=json"
+                    + "&" + URLEncoder.encode("pageNo","UTF-8") + "=" + 1;
+            Map<String, Object> firstBody = callSafemap(url);
+
+            int totalCount = firstBody == null ? 0 : Integer.parseInt(String.valueOf(firstBody.getOrDefault("totalCount", 0)));
+
+            int totalPages = (int) Math.ceil((double) totalCount / pageSize);
+            totalList.addAll(extractItems(firstBody));
+
+            for (int pageNo = 2; pageNo <= totalPages; pageNo++) {
+                url = "http://safemap.go.kr/openApiService/data/getPublicInstitutionsData.do"
+                        + "?" + URLEncoder.encode("serviceKey","UTF-8") + "=" + URLEncoder.encode(safeServiceKey, "UTF-8") // 값도 인코딩!
+                        + "&" + URLEncoder.encode("numOfRows","UTF-8") + "=" + pageSize
+                        + "&" + URLEncoder.encode("Fclty_Cd","UTF-8") + "=501010"
+                        + "&" + URLEncoder.encode("dataType","UTF-8") + "=json"
+                        + "&" + URLEncoder.encode("pageNo","UTF-8") + "=" + pageNo;
+                Map<String, Object> body = callSafemap(url);
+                totalList.addAll(extractItems(body));
+                System.out.println("적재된 데이터 수 : "+totalList.size());
+            }
+            System.out.println("적재된 데이터 수 : "+totalList.size());
+            int insertgovernmentOffice = safemapService.insertgovernmentOffice(totalList);
+            System.out.println(insertgovernmentOffice);
+        } catch (Exception e) {
+            log.error("Safemap 수집 실패", e);
+        }
+    }
+    
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> callSafemap(String url) throws Exception {

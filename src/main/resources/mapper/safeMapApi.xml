@@ -76,4 +76,84 @@
         FROM feat
 
     </insert>
+    <insert id="insertgovernmentOffice" parameterType="java.util.List">
+        INSERT INTO map.government_office
+        (objt_id, fclty_ty, fclty_cd, fclty_nm, adres, rn_adres, telno,
+        ctprvn_cd, sgg_cd, emd_cd, x_coord, y_coord, data_yr, geom, created_at, updated_at)
+        SELECT
+        v.objt_id, v.fclty_ty, v.fclty_cd, v.fclty_nm, v.adres, v.rn_adres, v.telno,
+        v.ctprvn_cd, v.sgg_cd, v.emd_cd, v.x_coord, v.y_coord, v.data_yr,
+        CASE
+        WHEN v.x_coord IS NOT NULL AND v.y_coord IS NOT NULL
+        THEN ST_SetSRID(ST_MakePoint(v.x_coord, v.y_coord), 3857)
+        ELSE NULL
+        END AS geom,
+        now(), now()
+        FROM (
+        VALUES
+        <foreach collection="list" item="i" separator=",">
+            (
+            #{i.objtId},
+            #{i.fcltyTy},
+            #{i.fcltyCd},
+            #{i.fcltyNm},
+            #{i.adres},
+            #{i.rnAdres},
+            #{i.telno},
+            #{i.ctprvnCd},
+            #{i.sggCd},
+            #{i.emdCd},
+            CAST(#{i.xCoord} AS double precision),
+            CAST(#{i.yCoord} AS double precision),
+            #{i.dataYr}
+            )
+        </foreach>
+        ) AS v(
+        objt_id, fclty_ty, fclty_cd, fclty_nm, adres, rn_adres, telno,
+        ctprvn_cd, sgg_cd, emd_cd, x_coord, y_coord, data_yr
+        )
+        LEFT JOIN map.government_office go
+        ON go.objt_id = v.objt_id
+        WHERE go.objt_id IS NULL
+    </insert>
+    <insert id="insertgovernmentOfficeGeojson">
+        CREATE OR REPLACE VIEW map.v_government_office_geojson AS
+        WITH dedup AS (
+        SELECT DISTINCT ON (x_coord, y_coord)
+        objt_id, fclty_nm, fclty_ty, fclty_cd, adres, rn_adres,
+        telno, ctprvn_cd, sgg_cd, emd_cd, x_coord, y_coord,
+        data_yr, geom
+        FROM map.government_office
+        WHERE geom IS NOT NULL
+        ORDER BY x_coord, y_coord, objt_id DESC
+        ),
+        feat AS (
+        SELECT json_build_object(
+        'type', 'Feature',
+        'id', 'map:government_office.' || objt_id::text,
+        'geometry', ST_AsGeoJSON(geom)::json,
+        'properties', json_build_object(
+        'objt_id', objt_id,
+        'fclty_nm', fclty_nm,
+        'fclty_ty', fclty_ty,
+        'fclty_cd', fclty_cd,
+        'adres', adres,
+        'rn_adres', rn_adres,
+        'telno', telno,
+        'ctprvn_cd', ctprvn_cd,
+        'sgg_cd', sgg_cd,
+        'emd_cd', emd_cd,
+        'x_coord', x_coord,
+        'y_coord', y_coord,
+        'data_yr', data_yr
+        )
+        ) AS feature
+        FROM dedup
+        )
+        SELECT json_build_object(
+        'type', 'FeatureCollection',
+        'features', COALESCE(json_agg(feature), '[]'::json)
+        ) AS geojson
+        FROM feat
+    </insert>
 </mapper>
