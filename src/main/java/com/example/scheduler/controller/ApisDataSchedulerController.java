@@ -437,7 +437,7 @@ public class ApisDataSchedulerController {
      * 업데이트 시간 : 매일 06시 00분
      */
     //@RequestMapping("/apis/housing/aptTrades")
-    @Scheduled(cron = "0 40 15 19 * *")
+    @Scheduled(cron = "0 0 06 1 * *")
     public void aptTrades() {
         final int requestPerPage = 10000; // 요청할 페이지당 건수
         final String base = "https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev";
