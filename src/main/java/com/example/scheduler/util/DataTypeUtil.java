@@ -149,4 +149,5 @@ public final class DataTypeUtil {
     public static Integer toInt(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:Integer.valueOf(s);}catch(Exception e){return null;}}
     public static Long toLong(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:Long.valueOf(s);}catch(Exception e){return null;}}
     public static BigDecimal toDecimal(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:new BigDecimal(s);}catch(Exception e){return null;}}
+
 }

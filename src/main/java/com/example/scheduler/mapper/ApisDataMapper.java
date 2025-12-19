@@ -17,6 +17,7 @@ public interface ApisDataMapper {
     void insertApisPharmacyInfoGeoJson();
     List<String> insertHospital(@Param("list") List<HospitalInfoDto> list);
     void insertApisHospitalInfoGeoJson();
+    List<String> insertAptTrades(@Param("list") List<AptTradesInfoDto> list);
 
 
 

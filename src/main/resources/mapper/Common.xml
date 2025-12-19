@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.scheduler.mapper.CommonMapper">
+    <select id="selectSggList" resultType="com.example.scheduler.dto.SggInfoDto">
+        select
+            sgg_cd::text                                 as sggCd,
+            sgg_nm::text                                 as sggNm,
+            ST_AsGeoJSON(ST_Simplify(geom, 0.001), 5)    as geom,
+            to_char(reg_date, 'yyyy-mm-dd hh24:mi:ss')   as regDate
+        from public.g_sgg
+    </select>
+</mapper>

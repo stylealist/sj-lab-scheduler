@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -21,6 +22,7 @@ import java.util.*;
 
 @Slf4j
 @RestController
+@Transactional
 public class ItsDataSchedulerController {
     @Value("${apikey.its}")
     private String itsServiceKey;
@@ -32,7 +34,7 @@ public class ItsDataSchedulerController {
     /**
      * 국가교통정보센터 실시간 CCTV API 데이터를 DB에 저장하는 기능
      * 대상 레이어 : (CCTV)
-     * 업데이트 시간 : 매일 03시 20분
+     * 업데이트 시간 : 매일 06시 00분
      */
     @Scheduled(cron = "0 00 06 * * *")
     @RequestMapping("/its/cctv-info")

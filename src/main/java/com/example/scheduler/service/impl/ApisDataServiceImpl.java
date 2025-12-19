@@ -149,6 +149,32 @@ public class ApisDataServiceImpl implements ApisDataService {
         return inserted; // ✅ 실제 삽입된 건수
     }
 
+    @Override
+    public int insertAptTrades(List<Map<String, Object>> item) throws Exception {
+        // 1) Map → DTO 변환
+        List<AptTradesInfoDto> dtos = mapToAptTradesDtos(item);
+        if (dtos == null || dtos.isEmpty()) return 0;
+
+        // 2) 파라미터 한도 회피: 안전하게 1,000행씩 분할
+        final int batchSize = 500;
+        int inserted = 0;
+
+        for (int i = 0; i < dtos.size(); i += batchSize) {
+            List<AptTradesInfoDto> chunk = dtos.subList(i, Math.min(i + batchSize, dtos.size()));
+
+            // 3) Mapper 호출 (RETURNING stop_code → 실제 삽입된 코드 목록 수)
+            // 방법 A: @Param("list") 사용 시
+            List<String> insertedCodes = mapper.insertAptTrades(chunk);
+
+            inserted += (insertedCodes != null ? insertedCodes.size() : 0);
+            System.out.println("Inserted rows: " + inserted);
+        }
+        mapper.insertApisHospitalInfoGeoJson();
+
+        System.out.println("Inserted rows: " + inserted);
+        return inserted; // ✅ 실제 삽입된 건수
+    }
+
     private List<BusCityInfoDto> mapToBusCityDtos(List<Map<String, Object>> items) throws Exception {
         List<BusCityInfoDto> dtos = new ArrayList<>(items.size());
 
@@ -315,6 +341,84 @@ public class ApisDataServiceImpl implements ApisDataService {
                     .collectedOn(toLocalDate(first(m, "COLLECTED_ON", "collected_on", "collectedOn")))
                     .createdAt(toLocalDateTime(first(m, "CREATED_AT", "created_at", "createdAt")))
                     .updatedAt(toLocalDateTime(first(m, "UPDATED_AT", "updated_at", "updatedAt")))
+                    .build();
+
+            dtos.add(dto);
+        }
+        return dtos;
+    }
+
+    private List<AptTradesInfoDto> mapToAptTradesDtos(List<Map<String, Object>> items) {
+        // items가 null이면 빈 리스트 반환 (안전 처리)
+        if (items == null || items.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<AptTradesInfoDto> dtos = new ArrayList<>(items.size());
+
+        for (Map<String, Object> m : items) {
+            // 1. 필수값 체크 (DataTypeUtil.s, first, isBlank 사용)
+            String aptNm = s(first(m, "aptNm", "apt_nm"));
+            if (isBlank(aptNm)) continue;
+
+            // 2. 거래금액 콤마 제거 처리 (중요!)
+            // API가 "82,500" 처럼 콤마를 줄 수 있는데, DataTypeUtil.l()은 이를 숫자로 인식 못함
+            String dealAmountStr = s(first(m, "dealAmount", "deal_amount"));
+            if (dealAmountStr != null) {
+                dealAmountStr = dealAmountStr.replace(",", "");
+            }
+
+            // 3. 빌더 패턴으로 DTO 생성
+            AptTradesInfoDto dto = AptTradesInfoDto.builder()
+                    // --- 문자열 (String) ---
+                    .sggCd(s(first(m, "sggCd", "sgg_cd")))
+                    .umdCd(s(first(m, "umdCd", "umd_cd")))
+                    .landCd(s(first(m, "landCd", "land_cd")))
+                    .bonbun(s(first(m, "bonbun")))
+                    .bubun(s(first(m, "bubun")))
+                    .jibun(s(first(m, "jibun")))
+
+                    .umdNm(s(first(m, "umdNm", "umd_nm")))
+                    .roadNm(s(first(m, "roadNm", "road_nm")))
+                    .roadNmSggCd(s(first(m, "roadNmSggCd", "road_nm_sgg_cd")))
+                    .roadNmCd(s(first(m, "roadNmCd", "road_nm_cd")))
+                    .roadNmSeq(s(first(m, "roadNmSeq", "road_nm_seq")))
+                    // DTO 필드명이 roadNmbCd 인지 roadNmNmbCd 인지 확인 필요 (여기서는 roadNmbCd로 가정)
+                    .roadNmbCd(s(first(m, "roadNmbCd", "road_nmb_cd")))
+                    .roadNmBonbun(s(first(m, "roadNmBonbun", "road_nm_bonbun")))
+                    .roadNmBubun(s(first(m, "roadNmBubun", "road_nm_bubun")))
+
+                    .aptNm(aptNm)
+                    .aptDong(s(first(m, "aptDong", "apt_dong")))
+                    .aptSeq(s(first(m, "aptSeq", "apt_seq")))
+
+                    .dealingGbn(s(first(m, "dealingGbn", "dealing_gbn")))
+                    .cdealType(s(first(m, "cdealType", "cdeal_type")))
+                    .cdealDay(s(first(m, "cdealDay", "cdeal_day")))
+                    .estateAgentSggNm(s(first(m, "estateAgentSggNm", "estate_agent_sgg_nm")))
+                    .slerGbn(s(first(m, "slerGbn", "sler_gbn")))
+                    .buyerGbn(s(first(m, "buyerGbn", "buyer_gbn")))
+                    .rgstDate(s(first(m, "rgstDate", "rgst_date")))
+                    .landLeaseholdGbn(s(first(m, "landLeaseholdGbn", "land_leasehold_gbn")))
+
+                    // --- 정수형 (Integer) ---
+                    // DataTypeUtil.i() 사용
+                    .buildYear(i(first(m, "buildYear", "build_year")))
+                    .floor(i(first(m, "floor")))
+                    .dealYear(i(first(m, "dealYear", "deal_year")))
+                    .dealMonth(i(first(m, "dealMonth", "deal_month")))
+                    .dealDay(i(first(m, "dealDay", "deal_day")))
+
+                    // --- 금액 (Long) ---
+                    // 위에서 콤마 제거한 dealAmountStr 사용 + DataTypeUtil.l() 사용
+                    .dealAmount(l(dealAmountStr))
+
+                    // --- 면적 (BigDecimal) ---
+                    // ★ bd 대신 DataTypeUtil.decimal() 사용
+                    .excluUseAr(decimal(first(m, "excluUseAr", "exclu_use_ar")))
+
+                    // --- 날짜/시간 ---
+                    .createdAt(String.valueOf(LocalDateTime.now())) // 수집 시간
                     .build();
 
             dtos.add(dto);

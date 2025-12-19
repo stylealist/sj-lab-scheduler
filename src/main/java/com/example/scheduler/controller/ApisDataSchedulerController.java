@@ -1,12 +1,16 @@
 package com.example.scheduler.controller;
 
 import com.example.scheduler.dto.BusCityInfoDto;
+import com.example.scheduler.dto.SggInfoDto;
 import com.example.scheduler.service.ApisDataService;
+import com.example.scheduler.service.CommonService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.w3c.dom.Document;
@@ -25,18 +29,25 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 import static com.example.scheduler.util.DataConverter.xmlToList;
 
 @Slf4j
 @RestController
+@Transactional
 public class ApisDataSchedulerController {
     @Value("${apikey.apis}")
     private String apisServiceKey;
     private static ApisDataService apisDataService;
-    public ApisDataSchedulerController(ApisDataService apisDataService) {
+    private static CommonService commonService;
+    public ApisDataSchedulerController(ApisDataService apisDataService,
+                                       CommonService commonService) {
         this.apisDataService = apisDataService;
+        this.commonService = commonService;
     }
 
     /**
@@ -418,6 +429,135 @@ public class ApisDataSchedulerController {
 
         } catch (Exception e) {
             log.error("busInfo 수집 실패", e);
+        }
+    }
+    /**
+     * 공공데이터포털에서 국토교통부_아파트 매매 실거래가 상세 자료 정보 데이터를 DB에 저장하는 기능
+     * 대상 데이터 : 아파트 실거래가 속성정보
+     * 업데이트 시간 : 매일 06시 00분
+     */
+    //@RequestMapping("/apis/housing/aptTrades")
+    @Scheduled(cron = "0 40 15 19 * *")
+    public void aptTrades() {
+        final int requestPerPage = 10000; // 요청할 페이지당 건수
+        final String base = "https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev";
+
+        List<Map<String, Object>> totalData = new ArrayList<>();
+        try {
+            List<SggInfoDto> sggList = commonService.selectSggList();
+            // 1. 현재 날짜 구하기
+            LocalDate now = LocalDate.now();
+            // 2. 포맷 정의 (yyyy=년도 4자리, MM=월 2자리)
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMM");
+            // 3. 변환
+            String formatedNow = now.format(formatter);
+            for(SggInfoDto sggData : sggList){
+                String lawdCd = sggData.getSggCd();
+                String dealYml = formatedNow;
+                // 1) 첫 페이지 요청
+                StringBuilder first = new StringBuilder(base)
+                        .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                        .append("&LAWD_CD=").append(lawdCd)
+                        .append("&DEAL_YMD=").append(dealYml)
+                        .append("&pageNo=1")
+                        .append("&numOfRows=").append(requestPerPage);
+
+                Map<String, Object> page1Response = xmlToList(first);
+                if (page1Response == null || page1Response.isEmpty()) {
+                    log.warn("아파트매매 자료 API 첫 페이지 응답이 비어 있습니다.");
+                    continue;
+                }
+
+                // XML 응답에서 메타 정보 추출
+                Map<String, Object> body = (Map<String, Object>) page1Response.get("body");
+                if (body == null) {
+                    log.warn("응답에서 body를 찾을 수 없습니다.");
+                    continue;
+                }
+
+                int totalCount = toInt(body.get("totalCount"));
+                int numOfRows = toInt(body.get("numOfRows")); // 실제 요청된 페이지 크기
+
+                // items에서 실제 데이터 추출
+                Map<String, Object> items = (Map<String, Object>) body.get("items");
+                List<Map<String, Object>> data1 = new ArrayList<>();
+
+                if (items != null) {
+                    Object itemData = items.get("item");
+                    if (itemData instanceof List) {
+                        data1 = (List<Map<String, Object>>) itemData;
+                    } else if (itemData instanceof Map) {
+                        // item이 하나만 있는 경우
+                        data1.add((Map<String, Object>) itemData);
+                    }
+                }
+
+                totalData.addAll(data1);
+
+                // 실제 페이지당 건수 계산 (fallback 로직)
+                int respPerPage = numOfRows > 0 ? numOfRows : data1.size();
+                if (respPerPage <= 0) respPerPage = requestPerPage; // 최종 fallback
+
+                int totalPages = (int) Math.ceil((double) totalCount / respPerPage);
+
+                log.info("아파트 매매 데이터 수집 시작 - 총 {}건, 예상 {}페이지 (첫 페이지: {}건 수집)",
+                        totalCount, totalPages, data1.size());
+                log.info("누계: {} / 총 {} (page=1, currentCount={}, respPerPage={})",
+                        totalData.size(), totalCount, data1.size(), respPerPage);
+
+                // 2) 2페이지부터 마지막 페이지까지 수집
+                for (int currentPageNo = 2; currentPageNo <= totalPages; currentPageNo++) {
+                    StringBuilder urlBuilder = new StringBuilder(base)
+                            .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                            .append("&LAWD_CD=").append(lawdCd)
+                            .append("&DEAL_YMD=").append(dealYml)
+                            .append("&pageNo=").append(currentPageNo)
+                            .append("&numOfRows=").append(requestPerPage);
+
+                    Map<String, Object> pageNResponse = xmlToList(urlBuilder);
+                    if (pageNResponse == null || pageNResponse.isEmpty()) {
+                        log.warn("페이지 {}의 응답이 비어 있습니다. 수집을 중단합니다.", currentPageNo);
+                        break;
+                    }
+                    // 응답에서 데이터 추출
+                    Map<String, Object> pageBody = (Map<String, Object>) pageNResponse.get("body");
+                    if (pageBody == null) {
+                        log.warn("페이지 {}에서 body를 찾을 수 없습니다.", currentPageNo);
+                        break;
+                    }
+                    Map<String, Object> pageItems = (Map<String, Object>) pageBody.get("items");
+                    List<Map<String, Object>> dataN = new ArrayList<>();
+
+                    if (pageItems != null) {
+                        Object itemData = pageItems.get("item");
+                        if (itemData instanceof List) {
+                            dataN = (List<Map<String, Object>>) itemData;
+                        } else if (itemData instanceof Map) {
+                            dataN.add((Map<String, Object>) itemData);
+                        }
+                    }
+
+                    totalData.addAll(dataN);
+
+                    log.info("누계: {} / 총 {} (page={}, currentCount={})",
+                            totalData.size(), totalCount, currentPageNo, dataN.size());
+
+                    // API 호출 제한을 고려한 대기 시간 (선택사항)
+                    try {
+                        Thread.sleep(100); // 100ms 대기
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+                log.info("아파트 매매 정보 수집 완료 - 총 {}건 수집", totalData.size());
+            }
+            System.out.println(totalData);
+
+            int inserted = apisDataService.insertAptTrades(totalData);
+        } catch (Exception e) {
+            log.error("아파트 매매 정보 수집 실패", e);
+            throw new RuntimeException("아파트 매매 API 데이터 수집 중 오류 발생", e);
         }
     }
 

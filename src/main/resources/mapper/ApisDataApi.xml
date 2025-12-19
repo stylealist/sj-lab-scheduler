@@ -374,4 +374,62 @@
         ) AS geojson
         FROM feat
     </select>
+    <select id="insertAptTrades" parameterType="java.util.List" resultType="string">
+        INSERT INTO ai.apt_trades (
+        sgg_cd, umd_cd, land_cd, bonbun, bubun, jibun,
+        umd_nm, road_nm, road_nm_sgg_cd, road_nm_cd, road_nm_seq,
+        road_nmb_cd, road_nm_bonbun, road_nm_bubun,
+        apt_nm, apt_dong, apt_seq,
+        build_year, exclu_use_ar, floor,
+        deal_year, deal_month, deal_day, deal_amount,
+        dealing_gbn, cdeal_type, cdeal_day, estate_agent_sgg_nm,
+        sler_gbn, buyer_gbn, rgst_date, land_leasehold_gbn,
+        created_at
+        )
+        SELECT
+        t.sgg_cd, t.umd_cd, t.land_cd, t.bonbun, t.bubun, t.jibun,
+        t.umd_nm, t.road_nm, t.road_nm_sgg_cd, t.road_nm_cd, t.road_nm_seq,
+        t.road_nmb_cd, t.road_nm_bonbun, t.road_nm_bubun,
+        t.apt_nm, t.apt_dong, t.apt_seq,
+        t.build_year::integer,
+        t.exclu_use_ar::numeric,
+        t.floor::integer,
+        t.deal_year::integer,
+        t.deal_month::integer,
+        t.deal_day::integer,
+        t.deal_amount::bigint,
+        t.dealing_gbn, t.cdeal_type, t.cdeal_day, t.estate_agent_sgg_nm,
+        t.sler_gbn, t.buyer_gbn, t.rgst_date, t.land_leasehold_gbn,
+        CASE
+        WHEN t.created_at IS NULL THEN NOW()
+        ELSE t.created_at::timestamp
+        END
+        FROM (
+        VALUES
+        <foreach collection="list" item="i" separator=",">
+            (
+            #{i.sggCd}, #{i.umdCd}, #{i.landCd}, #{i.bonbun}, #{i.bubun}, #{i.jibun},
+            #{i.umdNm}, #{i.roadNm}, #{i.roadNmSggCd}, #{i.roadNmCd}, #{i.roadNmSeq},
+            #{i.roadNmbCd}, #{i.roadNmBonbun}, #{i.roadNmBubun},
+            #{i.aptNm}, #{i.aptDong}, #{i.aptSeq},
+            #{i.buildYear}, #{i.excluUseAr}, #{i.floor},
+            #{i.dealYear}, #{i.dealMonth}, #{i.dealDay}, #{i.dealAmount},
+            #{i.dealingGbn}, #{i.cdealType}, #{i.cdealDay}, #{i.estateAgentSggNm},
+            #{i.slerGbn}, #{i.buyerGbn}, #{i.rgstDate}, #{i.landLeaseholdGbn},
+            #{i.createdAt}
+            )
+        </foreach>
+        ) AS t(
+        sgg_cd, umd_cd, land_cd, bonbun, bubun, jibun,
+        umd_nm, road_nm, road_nm_sgg_cd, road_nm_cd, road_nm_seq,
+        road_nmb_cd, road_nm_bonbun, road_nm_bubun,
+        apt_nm, apt_dong, apt_seq,
+        build_year, exclu_use_ar, floor,
+        deal_year, deal_month, deal_day, deal_amount,
+        dealing_gbn, cdeal_type, cdeal_day, estate_agent_sgg_nm,
+        sler_gbn, buyer_gbn, rgst_date, land_leasehold_gbn,
+        created_at
+        )
+        RETURNING id::text
+    </select>
 </mapper>
