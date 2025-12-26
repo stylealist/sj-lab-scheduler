@@ -5,6 +5,7 @@ import com.example.scheduler.service.ApisDataService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cglib.core.Local;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,8 +14,10 @@ import static com.example.scheduler.util.DataTypeUtil.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -151,28 +154,82 @@ public class ApisDataServiceImpl implements ApisDataService {
 
     @Override
     public int insertAptTrades(List<Map<String, Object>> item) throws Exception {
-        // 1) Map → DTO 변환
-        List<AptTradesInfoDto> dtos = mapToAptTradesDtos(item);
-        if (dtos == null || dtos.isEmpty()) return 0;
+        if (item == null || item.isEmpty()) return 0;
 
-        // 2) 파라미터 한도 회피: 안전하게 1,000행씩 분할
+        // [중요] 전체 30일 치 데이터를 모을 바구니를 반복문 '밖'에 만듭니다.
+        List<AptTradesInfoDto> allDataToInsert = new ArrayList<>();
+
+        LocalDate today = LocalDate.now();
+        int minusDay = 30; // 30일 전부터 검사
+
+        // [STEP 1] 30일간 루프를 돌며 넣을 데이터를 수집(Collect)
+        while (minusDay > 0) {
+            // 날짜 계산
+            LocalDate targetDate = today.minusDays(minusDay);
+            int targetYear = targetDate.getYear();
+            int targetMonth = targetDate.getMonthValue();
+            int targetDay = targetDate.getDayOfMonth();
+
+            // 반복 횟수 줄이기 (맨 끝이나 맨 처음에 해도 되지만 누락 주의)
+            minusDay--;
+
+            // 1-1. DB에 해당 날짜 데이터가 있는지 확인
+            AptTradesInfoDto aptTradesInfoDto = new AptTradesInfoDto();
+            aptTradesInfoDto.setDealYear(targetYear);
+            aptTradesInfoDto.setDealMonth(targetMonth);
+            aptTradesInfoDto.setDealDay(targetDay);
+
+            int count = mapper.countAptTrades(aptTradesInfoDto);
+
+            // [핵심] 데이터가 이미 있으면(count > 0) 이 날짜는 건너뜀(Skip)
+            if (count > 0) {
+                System.out.println(targetDate + " 데이터는 이미 존재하여 건너뜁니다.");
+                continue; // break가 아니라 continue를 써야 다음 날짜로 넘어갑니다.
+            }
+
+            // 1-2. 전체 리스트(item)에서 해당 날짜 데이터만 걸러내기
+            List<Map<String, Object>> filteredItems = item.stream()
+                    .filter(map -> {
+                        int y = toInt(map.get("dealYear"));
+                        int m = toInt(map.get("dealMonth"));
+                        int d = toInt(map.get("dealDay"));
+                        return y == targetYear && m == targetMonth && d == targetDay;
+                    })
+                    .collect(Collectors.toList());
+
+            // 해당 날짜에 API 데이터도 없다면 다음 날짜로 진행
+            if (filteredItems.isEmpty()) {
+                continue;
+            }
+
+            // 1-3. DTO 변환 후 '전체 바구니'에 담기
+            List<AptTradesInfoDto> dailyDtos = mapToAptTradesDtos(filteredItems);
+            if (dailyDtos != null && !dailyDtos.isEmpty()) {
+                allDataToInsert.addAll(dailyDtos); // 여기서 차곡차곡 쌓습니다.
+            }
+        }
+
+        // [STEP 2] 모인 데이터가 하나도 없으면 종료
+        if (allDataToInsert.isEmpty()) {
+            System.out.println("저장할 새로운 데이터가 없습니다.");
+            return 0;
+        }
+
+        // [STEP 3] 배치 Insert (모아둔 데이터를 500개씩 잘라서 저장)
         final int batchSize = 500;
         int inserted = 0;
 
-        for (int i = 0; i < dtos.size(); i += batchSize) {
-            List<AptTradesInfoDto> chunk = dtos.subList(i, Math.min(i + batchSize, dtos.size()));
+        for (int i = 0; i < allDataToInsert.size(); i += batchSize) {
+            List<AptTradesInfoDto> chunk = allDataToInsert.subList(i, Math.min(i + batchSize, allDataToInsert.size()));
 
-            // 3) Mapper 호출 (RETURNING stop_code → 실제 삽입된 코드 목록 수)
-            // 방법 A: @Param("list") 사용 시
             List<String> insertedCodes = mapper.insertAptTrades(chunk);
-
             inserted += (insertedCodes != null ? insertedCodes.size() : 0);
-            System.out.println("Inserted rows: " + inserted);
-        }
-        mapper.insertApisHospitalInfoGeoJson();
 
-        System.out.println("Inserted rows: " + inserted);
-        return inserted; // ✅ 실제 삽입된 건수
+            System.out.println("Inserted rows (batch): " + (insertedCodes != null ? insertedCodes.size() : 0));
+        }
+
+        System.out.println("Total Inserted rows: " + inserted);
+        return inserted;
     }
 
     private List<BusCityInfoDto> mapToBusCityDtos(List<Map<String, Object>> items) throws Exception {

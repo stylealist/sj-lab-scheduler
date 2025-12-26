@@ -4,6 +4,13 @@
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 <mapper namespace="com.example.scheduler.mapper.ApisDataMapper">
+    <select id="countAptTrades" parameterType="com.example.scheduler.dto.BusCityInfoDto" resultType="int">
+        SELECT COUNT(*)
+        FROM ai.apt_trades
+        WHERE deal_year = #{dealYear}
+        AND deal_month = #{dealMonth}
+        AND deal_day = #{dealDay}
+    </select>
     <select id="selectApisBusCityInfo" resultType="com.example.scheduler.dto.BusCityInfoDto">
         select
             seq                                         as seq,

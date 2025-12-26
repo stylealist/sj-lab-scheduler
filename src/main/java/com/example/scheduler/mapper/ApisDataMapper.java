@@ -5,9 +5,11 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
+import java.util.Map;
 
 @Mapper
 public interface ApisDataMapper {
+    int countAptTrades(AptTradesInfoDto param);
     int insertApisBusCityInfo(@Param("list") List<BusCityInfoDto> list);
     List<String> insertApisBusRouteInfo(@Param("list") List<BusRouteInfoDto> list);
     List<BusCityInfoDto> selectApisBusCityInfo();
@@ -18,7 +20,4 @@ public interface ApisDataMapper {
     List<String> insertHospital(@Param("list") List<HospitalInfoDto> list);
     void insertApisHospitalInfoGeoJson();
     List<String> insertAptTrades(@Param("list") List<AptTradesInfoDto> list);
-
-
-
 }
