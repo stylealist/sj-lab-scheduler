@@ -11,6 +11,13 @@
         AND deal_month = #{dealMonth}
         AND deal_day = #{dealDay}
     </select>
+    <select id="countAptRents" parameterType="com.example.scheduler.dto.AptRentsInfoDto" resultType="int">
+        SELECT COUNT(*)
+        FROM ai.apt_rents
+        WHERE deal_year = #{dealYear}
+        AND deal_month = #{dealMonth}
+        AND deal_day = #{dealDay}
+    </select>
     <select id="selectApisBusCityInfo" resultType="com.example.scheduler.dto.BusCityInfoDto">
         select
             seq                                         as seq,
@@ -435,6 +442,67 @@
         deal_year, deal_month, deal_day, deal_amount,
         dealing_gbn, cdeal_type, cdeal_day, estate_agent_sgg_nm,
         sler_gbn, buyer_gbn, rgst_date, land_leasehold_gbn,
+        created_at
+        )
+        RETURNING id::text
+    </select>
+    <select id="insertAptRents" parameterType="java.util.List" resultType="string">
+        INSERT INTO ai.apt_rents (
+        sgg_cd, umd_nm, jibun, apt_nm, apt_seq,
+        build_year, exclu_use_ar, floor,
+        deal_year, deal_month, deal_day,
+        deposit, monthly_rent,
+        contract_term, contract_type, use_rr_right,
+        pre_deposit, pre_monthly_rent,
+        road_nm, road_nm_sgg_cd, road_nm_cd, road_nm_seq,
+        road_nmb_cd, road_nm_bonbun, road_nm_bubun,
+        created_at
+        )
+        SELECT
+        t.sgg_cd, t.umd_nm, t.jibun, t.apt_nm, t.apt_seq,
+        t.build_year::integer,
+        t.exclu_use_ar::numeric,
+        t.floor::integer,
+        t.deal_year::integer,
+        t.deal_month::integer,
+        t.deal_day::integer,
+        t.deposit::bigint,
+        t.monthly_rent::bigint,
+        t.contract_term, t.contract_type, t.use_rr_right,
+        t.pre_deposit::bigint,
+        t.pre_monthly_rent::bigint,
+        t.road_nm, t.road_nm_sgg_cd, t.road_nm_cd, t.road_nm_seq,
+        t.road_nmb_cd, t.road_nm_bonbun, t.road_nm_bubun,
+        CASE
+        WHEN t.created_at IS NULL THEN NOW()
+        ELSE t.created_at::timestamp
+        END
+        FROM (
+        VALUES
+        <foreach collection="list" item="i" separator=",">
+            (
+            #{i.sggCd}, #{i.umdNm}, #{i.jibun}, #{i.aptNm}, #{i.aptSeq},
+            #{i.buildYear}, #{i.excluUseAr}, #{i.floor},
+            #{i.dealYear}, #{i.dealMonth}, #{i.dealDay},
+            #{i.deposit}, #{i.monthlyRent},
+            #{i.contractTerm}, #{i.contractType}, #{i.useRRRight},
+            #{i.preDeposit}, #{i.preMonthlyRent},
+
+            #{i.roadNm}, #{i.roadNmSggCd}, #{i.roadNmCd}, #{i.roadNmSeq},
+            #{i.roadNmbCd}, #{i.roadNmBonbun}, #{i.roadNmBubun},
+
+            #{i.createdAt}
+            )
+        </foreach>
+        ) AS t(
+        sgg_cd, umd_nm, jibun, apt_nm, apt_seq,
+        build_year, exclu_use_ar, floor,
+        deal_year, deal_month, deal_day,
+        deposit, monthly_rent,
+        contract_term, contract_type, use_rr_right,
+        pre_deposit, pre_monthly_rent,
+        road_nm, road_nm_sgg_cd, road_nm_cd, road_nm_seq,
+        road_nmb_cd, road_nm_bonbun, road_nm_bubun,
         created_at
         )
         RETURNING id::text

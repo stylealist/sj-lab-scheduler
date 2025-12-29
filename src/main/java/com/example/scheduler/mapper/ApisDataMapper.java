@@ -9,7 +9,7 @@ import java.util.Map;
 
 @Mapper
 public interface ApisDataMapper {
-    int countAptTrades(AptTradesInfoDto param);
+
     int insertApisBusCityInfo(@Param("list") List<BusCityInfoDto> list);
     List<String> insertApisBusRouteInfo(@Param("list") List<BusRouteInfoDto> list);
     List<BusCityInfoDto> selectApisBusCityInfo();
@@ -19,5 +19,8 @@ public interface ApisDataMapper {
     void insertApisPharmacyInfoGeoJson();
     List<String> insertHospital(@Param("list") List<HospitalInfoDto> list);
     void insertApisHospitalInfoGeoJson();
+    int countAptTrades(AptTradesInfoDto param);
     List<String> insertAptTrades(@Param("list") List<AptTradesInfoDto> list);
+    int countAptRents(AptRentsInfoDto param);
+    List<String> insertAptRents(@Param("list") List<AptRentsInfoDto> list);
 }

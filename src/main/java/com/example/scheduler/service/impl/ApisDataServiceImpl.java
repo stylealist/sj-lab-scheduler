@@ -2,6 +2,7 @@ package com.example.scheduler.service.impl;
 import com.example.scheduler.dto.*;
 import com.example.scheduler.mapper.ApisDataMapper;
 import com.example.scheduler.service.ApisDataService;
+import com.example.scheduler.util.DataTypeUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,10 +14,7 @@ import static com.example.scheduler.util.DataTypeUtil.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -231,6 +229,133 @@ public class ApisDataServiceImpl implements ApisDataService {
         System.out.println("Total Inserted rows: " + inserted);
         return inserted;
     }
+    @Override
+    public int insertAptRents(List<Map<String, Object>> item) throws Exception {
+        if (item == null || item.isEmpty()) return 0;
+
+        // [변경] 날짜 계산 및 필터링 로직 제거 (초기 구축용)
+        // 받아온 item을 바로 DTO로 변환하여 저장할 준비를 합니다.
+        List<AptRentsInfoDto> allDataToInsert = mapToAptRentsDtos(item);
+
+    /* --- 기존 로직 주석 처리 시작 (나중에 복구하세요) ---
+    List<AptRentsInfoDto> allDataToInsert = new ArrayList<>();
+    LocalDate today = LocalDate.now();
+    int minusDay = 30;
+
+    while (minusDay > 0) {
+        // ... 날짜 계산 및 DB 중복 확인 로직 ...
+        // ... filter 로직 때문에 과거 데이터가 다 걸러집니다 ...
+    }
+    --- 기존 로직 주석 처리 끝 --- */
+
+        // [STEP 2] 저장할 데이터가 없으면 종료
+        if (allDataToInsert.isEmpty()) {
+            System.out.println("저장할 전월세 데이터가 없습니다.");
+            return 0;
+        }
+
+        System.out.println(">> 강제 저장 시작: 총 " + allDataToInsert.size() + "건");
+
+        // [STEP 3] 배치 Insert (500개씩 분할 저장) - 이건 그대로 유지해야 함
+        final int batchSize = 500;
+        int inserted = 0;
+
+        for (int i = 0; i < allDataToInsert.size(); i += batchSize) {
+            List<AptRentsInfoDto> chunk = allDataToInsert.subList(i, Math.min(i + batchSize, allDataToInsert.size()));
+
+            // 매퍼 호출
+            List<String> insertedCodes = mapper.insertAptRents(chunk);
+            inserted += (insertedCodes != null ? insertedCodes.size() : 0);
+
+            System.out.println("Inserted Rents rows (batch): " + (insertedCodes != null ? insertedCodes.size() : 0));
+        }
+
+        System.out.println("Total Inserted Rents rows: " + inserted);
+        return inserted;
+    }
+//    @Override
+//    public int insertAptRents(List<Map<String, Object>> item) throws Exception {
+//        if (item == null || item.isEmpty()) return 0;
+//
+//        // [중요] 전체 30일 치 전월세 데이터를 모을 바구니
+//        List<AptRentsInfoDto> allDataToInsert = new ArrayList<>();
+//
+//        LocalDate today = LocalDate.now();
+//        int minusDay = 30; // 30일 전부터 검사
+//
+//        // [STEP 1] 30일간 루프를 돌며 넣을 데이터를 수집
+//        while (minusDay > 0) {
+//            // 날짜 계산
+//            LocalDate targetDate = today.minusDays(minusDay);
+//            int targetYear = targetDate.getYear();
+//            int targetMonth = targetDate.getMonthValue();
+//            int targetDay = targetDate.getDayOfMonth();
+//
+//            minusDay--; // 루프 감소
+//
+//            // 1-1. DB에 해당 날짜 데이터가 있는지 확인 (중복 방지)
+//            // [수정] Map 대신 DTO 객체 사용 (insertAptTrades와 동일한 방식)
+//            AptRentsInfoDto checkDto = new AptRentsInfoDto();
+//            checkDto.setDealYear(targetYear);
+//            checkDto.setDealMonth(targetMonth);
+//            checkDto.setDealDay(targetDay);
+//
+//            // 매퍼 호출 (파라미터로 DTO 전달)
+//            int count = mapper.countAptRents(checkDto);
+//
+//            // [핵심] 데이터가 이미 있으면(count > 0) 건너뜀
+//            if (count > 0) {
+//                System.out.println(targetDate + " 전월세 데이터는 이미 존재하여 건너뜁니다.");
+//                continue;
+//            }
+//
+//            // 1-2. 전체 리스트(item)에서 해당 날짜 데이터만 필터링
+//            List<Map<String, Object>> filteredItems = item.stream()
+//                    .filter(map -> {
+//                        int y = toInt(map.get("dealYear"));
+//                        int m = toInt(map.get("dealMonth"));
+//                        int d = toInt(map.get("dealDay"));
+//                        return y == targetYear && m == targetMonth && d == targetDay;
+//                    })
+//                    .collect(Collectors.toList());
+//
+//            // 해당 날짜에 API 데이터도 없다면 다음 날짜로 진행
+//            if (filteredItems.isEmpty()) {
+//                continue;
+//            }
+//
+//            // 1-3. Map -> DTO 변환 후 전체 바구니에 담기
+//            List<AptRentsInfoDto> dailyDtos = mapToAptRentsDtos(filteredItems);
+//            if (dailyDtos != null && !dailyDtos.isEmpty()) {
+//                allDataToInsert.addAll(dailyDtos);
+//            }
+//        }
+//
+//        // [STEP 2] 저장할 데이터가 없으면 종료
+//        if (allDataToInsert.isEmpty()) {
+//            System.out.println("저장할 새로운 전월세 데이터가 없습니다.");
+//            return 0;
+//        }
+//
+//        // [STEP 3] 배치 Insert (500개씩 분할 저장)
+//        final int batchSize = 500;
+//        int inserted = 0;
+//
+//        for (int i = 0; i < allDataToInsert.size(); i += batchSize) {
+//            List<AptRentsInfoDto> chunk = allDataToInsert.subList(i, Math.min(i + batchSize, allDataToInsert.size()));
+//
+//            // [수정] 리턴값이 List<String>이므로 size()를 체크해서 더해줌
+//            List<String> insertedCodes = mapper.insertAptRents(chunk);
+//
+//            // null 체크 및 사이즈 합산
+//            inserted += (insertedCodes != null ? insertedCodes.size() : 0);
+//
+//            System.out.println("Inserted Rents rows (batch): " + (insertedCodes != null ? insertedCodes.size() : 0));
+//        }
+//
+//        System.out.println("Total Inserted Rents rows: " + inserted);
+//        return inserted;
+//    }
 
     private List<BusCityInfoDto> mapToBusCityDtos(List<Map<String, Object>> items) throws Exception {
         List<BusCityInfoDto> dtos = new ArrayList<>(items.size());
@@ -481,6 +606,55 @@ public class ApisDataServiceImpl implements ApisDataService {
             dtos.add(dto);
         }
         return dtos;
+    }
+    /**
+     * Map 리스트를 AptRentsInfoDto 리스트로 변환
+     */
+    private List<AptRentsInfoDto> mapToAptRentsDtos(List<Map<String, Object>> list) {
+        if (list == null || list.isEmpty()) return Collections.emptyList();
+
+        return list.stream().map(m -> {
+            AptRentsInfoDto dto = new AptRentsInfoDto();
+
+            // 기본 정보
+            dto.setSggCd(String.valueOf(m.get("sggCd")));
+            dto.setUmdNm(String.valueOf(m.get("umdNm")));
+            dto.setJibun(String.valueOf(m.get("jibun")));
+            dto.setAptNm(String.valueOf(m.get("aptNm")));
+            dto.setAptSeq(String.valueOf(m.get("aptSeq")));
+
+            // 숫자형 (공백/Null 처리 포함)
+            dto.setBuildYear(toInt(m.get("buildYear")));
+            dto.setFloor(toInt(m.get("floor")));
+            dto.setExcluUseAr(toDouble(m.get("excluUseAr")));
+
+            // 날짜
+            dto.setDealYear(toInt(m.get("dealYear")));
+            dto.setDealMonth(toInt(m.get("dealMonth")));
+            dto.setDealDay(DataTypeUtil.toInt(m.get("dealDay")));
+
+            // 금액 (콤마 제거 필수)
+            dto.setDeposit(toLong(m.get("deposit")));
+            dto.setMonthlyRent(toLong(m.get("monthlyRent")));
+
+            // 계약 상세
+            dto.setContractTerm(String.valueOf(m.get("contractTerm")));
+            dto.setContractType(String.valueOf(m.get("contractType")));
+            dto.setUseRRRight(String.valueOf(m.get("useRRRight")));
+            dto.setPreDeposit(toLong(m.get("preDeposit")));
+            dto.setPreMonthlyRent(toLong(m.get("preMonthlyRent")));
+
+            // 도로명 주소
+            dto.setRoadNm(String.valueOf(m.get("roadnm")));
+            dto.setRoadNmSggCd(String.valueOf(m.get("roadnmsggcd")));
+            dto.setRoadNmCd(String.valueOf(m.get("roadnmcd")));
+            dto.setRoadNmSeq(String.valueOf(m.get("roadnmseq")));
+            dto.setRoadNmbCd(String.valueOf(m.get("roadnmbcd")));
+            dto.setRoadNmBonbun(String.valueOf(m.get("roadnmbonbun")));
+            dto.setRoadNmBubun(String.valueOf(m.get("roadnmbubun")));
+
+            return dto;
+        }).collect(Collectors.toList());
     }
 
 }

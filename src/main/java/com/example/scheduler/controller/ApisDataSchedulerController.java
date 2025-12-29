@@ -553,6 +553,130 @@ public class ApisDataSchedulerController {
             throw new RuntimeException("아파트 매매 API 데이터 수집 중 오류 발생", e);
         }
     }
+    /**
+     * 공공데이터포털에서 국토교통부_아파트 전월세 자료 데이터를 DB에 저장하는 기능
+     * 대상 데이터 : 아파트 전월세 자료
+     * 업데이트 시간 : 매일 06시 00분
+     */
+    //@RequestMapping("/apis/housing/aptRents")
+    @Scheduled(cron = "0 0 07 * * *")
+    public void aptRents() {
+        final int requestPerPage = 10000; // 요청할 페이지당 건수
+        // [변경] 전월세 API URL
+        final String base = "https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent";
+
+        // 1. 날짜 설정 (이번 달 + 저번 달)
+        LocalDate now = LocalDate.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMM");
+
+        List<String> targetMonths = new ArrayList<>();
+        targetMonths.add(now.format(formatter));               // 이번 달
+        targetMonths.add(now.minusMonths(1).format(formatter)); // 저번 달
+
+        try {
+            List<SggInfoDto> sggList = commonService.selectSggList();
+
+            // [지역별 루프]
+            for (SggInfoDto sggData : sggList) {
+                String lawdCd = sggData.getSggCd();
+
+                // 지역별 데이터를 담을 리스트 (메모리 절약을 위해 지역마다 초기화)
+                List<Map<String, Object>> sggTotalData = new ArrayList<>();
+
+                // [날짜별 루프] (이번 달 -> 저번 달 순회)
+                for (String dealYmd : targetMonths) {
+
+                    // --- API 호출 로직 ---
+                    StringBuilder first = new StringBuilder(base)
+                            .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                            .append("&LAWD_CD=").append(lawdCd)
+                            .append("&DEAL_YMD=").append(dealYmd)
+                            .append("&pageNo=1")
+                            .append("&numOfRows=").append(requestPerPage);
+
+                    Map<String, Object> page1Response = xmlToList(first);
+
+                    // 데이터가 없거나 에러인 경우 다음 날짜로 넘어감
+                    if (page1Response == null || page1Response.isEmpty()) {
+                        continue;
+                    }
+
+                    Map<String, Object> body = (Map<String, Object>) page1Response.get("body");
+                    if (body == null) continue;
+
+                    int totalCount = toInt(body.get("totalCount"));
+                    int numOfRows = toInt(body.get("numOfRows"));
+
+                    // items 추출
+                    Map<String, Object> items = (Map<String, Object>) body.get("items");
+                    List<Map<String, Object>> data1 = new ArrayList<>();
+
+                    if (items != null) {
+                        Object itemData = items.get("item");
+                        if (itemData instanceof List) {
+                            data1 = (List<Map<String, Object>>) itemData;
+                        } else if (itemData instanceof Map) {
+                            data1.add((Map<String, Object>) itemData);
+                        }
+                    }
+
+                    sggTotalData.addAll(data1);
+
+                    // 페이지 계산
+                    int respPerPage = numOfRows > 0 ? numOfRows : data1.size();
+                    if (respPerPage <= 0) respPerPage = requestPerPage;
+                    int totalPages = (int) Math.ceil((double) totalCount / respPerPage);
+
+                    log.info("[전월세] {} 지역({}) - {} 데이터 수집: 총 {}건 (예상 페이지: {})",
+                            sggData.getSggNm(), lawdCd, dealYmd, totalCount, totalPages);
+
+                    // 2페이지부터 수집
+                    for (int currentPageNo = 2; currentPageNo <= totalPages; currentPageNo++) {
+                        StringBuilder urlBuilder = new StringBuilder(base)
+                                .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                                .append("&LAWD_CD=").append(lawdCd)
+                                .append("&DEAL_YMD=").append(dealYmd)
+                                .append("&pageNo=").append(currentPageNo)
+                                .append("&numOfRows=").append(requestPerPage);
+
+                        Map<String, Object> pageNResponse = xmlToList(urlBuilder);
+                        if (pageNResponse == null) break;
+
+                        Map<String, Object> pageBody = (Map<String, Object>) pageNResponse.get("body");
+                        if (pageBody == null) break;
+
+                        Map<String, Object> pageItems = (Map<String, Object>) pageBody.get("items");
+                        if (pageItems == null) break;
+
+                        List<Map<String, Object>> dataN = new ArrayList<>();
+                        Object itemData = pageItems.get("item");
+                        if (itemData instanceof List) {
+                            dataN = (List<Map<String, Object>>) itemData;
+                        } else if (itemData instanceof Map) {
+                            dataN.add((Map<String, Object>) itemData);
+                        }
+
+                        sggTotalData.addAll(dataN);
+
+                        try { Thread.sleep(50); } catch (InterruptedException e) { break; }
+                    }
+                } // [날짜 루프 종료]
+
+                // [중요] 한 지역(SGG)의 데이터 수집이 끝나면 DB 저장
+                if (!sggTotalData.isEmpty()) {
+                    log.info(">> DB 저장 시작 (전월세): 지역코드 {} (건수: {})", lawdCd, sggTotalData.size());
+                    // [변경] 전월세 전용 Insert 메서드 호출
+                    apisDataService.insertAptRents(sggTotalData);
+                    sggTotalData.clear();
+                }
+
+            } // [지역 루프 종료]
+
+        } catch (Exception e) {
+            log.error("아파트 전월세 정보 수집 실패", e);
+            throw new RuntimeException("아파트 전월세 API 데이터 수집 중 오류 발생", e);
+        }
+    }
 
     private static List<Map<String, Object>> busRouteInfoToList(StringBuilder urlBuilder){
         List<Map<String, Object>> resultData = new ArrayList<>();

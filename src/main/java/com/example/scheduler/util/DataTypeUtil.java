@@ -149,5 +149,31 @@ public final class DataTypeUtil {
     public static Integer toInt(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:Integer.valueOf(s);}catch(Exception e){return null;}}
     public static Long toLong(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:Long.valueOf(s);}catch(Exception e){return null;}}
     public static BigDecimal toDecimal(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:new BigDecimal(s);}catch(Exception e){return null;}}
+    /**
+     * Object -> Double 안전 변환
+     * Null이거나, 공백이거나, 변환 불가능한 값이면 null을 반환하여 에러 방지
+     */
+    public static Double toDouble(Object o) {
+        // 1. 객체 자체가 null이면 바로 종료 (여기서 NPE 방지됨)
+        if (o == null) {
+            return null;
+        }
+
+        try {
+            // 2. 문자열로 변환 후 공백 및 콤마 제거
+            String s = String.valueOf(o).trim().replace(",", "");
+
+            // 3. 빈 문자열("")이거나 "null"이라는 글자만 있으면 null 반환
+            if (s.isBlank() || "null".equalsIgnoreCase(s)) {
+                return null;
+            }
+
+            // 4. Double 변환 시도
+            return Double.valueOf(s);
+        } catch (NumberFormatException e) {
+            // 5. 숫자가 아닌 이상한 값이어도 죽지 않고 null 반환
+            return null;
+        }
+    }
 
 }

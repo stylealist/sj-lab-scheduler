@@ -13,5 +13,6 @@ public interface ApisDataService {
     int insertPharmacy(List<Map<String,Object>> item) throws Exception;
     int insertHospital(List<Map<String,Object>> item) throws Exception;
     int insertAptTrades(List<Map<String,Object>> item) throws Exception;
+    int insertAptRents(List<Map<String,Object>> item) throws Exception;
 
 }
