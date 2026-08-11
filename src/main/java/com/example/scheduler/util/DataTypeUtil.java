@@ -175,5 +175,12 @@ public final class DataTypeUtil {
             return null;
         }
     }
+    // 안전한 String 변환 (null인 경우 null 반환)
+    public static String toStr(Object obj) {
+        if (obj == null) return null;
+        String str = String.valueOf(obj).trim();
+        return str.isEmpty() ? null : str;
+    }
+
 
 }

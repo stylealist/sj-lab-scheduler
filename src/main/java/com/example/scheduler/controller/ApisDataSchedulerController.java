@@ -49,7 +49,10 @@ public class ApisDataSchedulerController {
         this.apisDataService = apisDataService;
         this.commonService = commonService;
     }
-
+    @RequestMapping("/apis/test")
+    public String test() {
+        return "test";
+    }
     /**
      * 공공데이터포털에서 버스노선정보 데이터를 DB에 저장하는 기능
      * 대상 레이어 : (CCTV)
@@ -365,72 +368,73 @@ public class ApisDataSchedulerController {
      * 공공데이터포털에서 전국 버스 정류장 위치 정보 데이터를 DB에 저장하는 기능
      * 대상 레이어 : (CCTV)
      * 업데이트 시간 : 매일 01시 00분
+     * 기타사항 : 공공데이터포털 스펙 아웃으로 api가 아닌 excel 다운로드해서 갱신해야함
      */
-    @Scheduled(cron = "0 00 01 * * *")
-    @RequestMapping("/apis/bus/busStopLocation")
-    public void busStopLocation() {
-        final int requestPerPage = 10000; // 권장: 1000 (ODcloud 상한)
-        final String base = "https://api.odcloud.kr/api/15067528/v1/uddi:ed6d9b4d-96cc-4e2a-85b3-98769395fc87";
-
-        List<Map<String, Object>> totalData = new ArrayList<>();
-        try {
-            // 1) 첫 페이지
-            StringBuilder first = new StringBuilder(base)
-                    .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
-                    .append("&page=1")
-                    .append("&perPage=").append(requestPerPage)
-                    .append("&returnType=json");
-
-            Map<String, Object> page1 = busStopLocationToList(first);
-            if (page1 == null || page1.isEmpty()) {
-                log.warn("ODcloud 첫 페이지 응답이 비어 있습니다.");
-                return;
-            }
-
-            int totalCount   = toInt(page1.get("totalCount"));
-            int respPerPage  = toInt(page1.get("perPage"));         // 서버가 실제로 적용한 perPage
-            int currentCount = toInt(page1.get("currentCount"));    // 이번 페이지 건수
-            if (respPerPage <= 0) respPerPage = currentCount;       // fallback
-            if (respPerPage <= 0) respPerPage = getDataSize(page1); // 최종 fallback
-
-            int totalPages = (int) Math.ceil((double) totalCount / respPerPage);
-
-            List<Map<String, Object>> data1 =
-                    (List<Map<String, Object>>) page1.getOrDefault("data", Collections.emptyList());
-            totalData.addAll(data1);
-
-            log.info("누계: {} / 총 {} (page=1, currentCount={}, respPerPage={})",
-                    totalData.size(), totalCount, currentCount, respPerPage);
-
-            // 2) 2 ~ totalPages
-            for (int pageNo = 2; pageNo <= totalPages; pageNo++) {
-                StringBuilder urlBuilder = new StringBuilder(base)
-                        .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
-                        .append("&page=").append(pageNo)
-                        .append("&perPage=").append(requestPerPage) // 요청은 1000으로 고정
-                        .append("&returnType=json");
-
-                Map<String, Object> pageN = busStopLocationToList(urlBuilder);
-                if (pageN == null || pageN.isEmpty()) break;
-
-                List<Map<String, Object>> dataN =
-                        (List<Map<String, Object>>) pageN.getOrDefault("data", Collections.emptyList());
-                if (dataN.isEmpty()) break;
-
-                totalData.addAll(dataN);
-
-                log.info("누계: {} / 총 {} (page={}, currentCount={})",
-                        totalData.size(), totalCount, pageNo, toInt(pageN.get("currentCount")));
-            }
-
-            // 대량이면 여기서 바로 INSERT 말고, 청크(예: 5000개) 단위로 배치 INSERT 권장
-            int inserted = apisDataService.insertBusStopLocations(totalData);
-            // log.info("총 수집: {}건, 삽입: {}건", total.size(), inserted);
-
-        } catch (Exception e) {
-            log.error("busInfo 수집 실패", e);
-        }
-    }
+//    @Scheduled(cron = "0 00 01 * * *")
+//    @RequestMapping("/apis/bus/busStopLocation")
+//    public void busStopLocation() {
+//        final int requestPerPage = 10000; // 권장: 1000 (ODcloud 상한)
+//        final String base = "https://api.odcloud.kr/api/15067528/v1/uddi:ed6d9b4d-96cc-4e2a-85b3-98769395fc87";
+//
+//        List<Map<String, Object>> totalData = new ArrayList<>();
+//        try {
+//            // 1) 첫 페이지
+//            StringBuilder first = new StringBuilder(base)
+//                    .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+//                    .append("&page=1")
+//                    .append("&perPage=").append(requestPerPage)
+//                    .append("&returnType=json");
+//
+//            Map<String, Object> page1 = busStopLocationToList(first);
+//            if (page1 == null || page1.isEmpty()) {
+//                log.warn("ODcloud 첫 페이지 응답이 비어 있습니다.");
+//                return;
+//            }
+//
+//            int totalCount   = toInt(page1.get("totalCount"));
+//            int respPerPage  = toInt(page1.get("perPage"));         // 서버가 실제로 적용한 perPage
+//            int currentCount = toInt(page1.get("currentCount"));    // 이번 페이지 건수
+//            if (respPerPage <= 0) respPerPage = currentCount;       // fallback
+//            if (respPerPage <= 0) respPerPage = getDataSize(page1); // 최종 fallback
+//
+//            int totalPages = (int) Math.ceil((double) totalCount / respPerPage);
+//
+//            List<Map<String, Object>> data1 =
+//                    (List<Map<String, Object>>) page1.getOrDefault("data", Collections.emptyList());
+//            totalData.addAll(data1);
+//
+//            log.info("누계: {} / 총 {} (page=1, currentCount={}, respPerPage={})",
+//                    totalData.size(), totalCount, currentCount, respPerPage);
+//
+//            // 2) 2 ~ totalPages
+//            for (int pageNo = 2; pageNo <= totalPages; pageNo++) {
+//                StringBuilder urlBuilder = new StringBuilder(base)
+//                        .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+//                        .append("&page=").append(pageNo)
+//                        .append("&perPage=").append(requestPerPage) // 요청은 1000으로 고정
+//                        .append("&returnType=json");
+//
+//                Map<String, Object> pageN = busStopLocationToList(urlBuilder);
+//                if (pageN == null || pageN.isEmpty()) break;
+//
+//                List<Map<String, Object>> dataN =
+//                        (List<Map<String, Object>>) pageN.getOrDefault("data", Collections.emptyList());
+//                if (dataN.isEmpty()) break;
+//
+//                totalData.addAll(dataN);
+//
+//                log.info("누계: {} / 총 {} (page={}, currentCount={})",
+//                        totalData.size(), totalCount, pageNo, toInt(pageN.get("currentCount")));
+//            }
+//
+//            // 대량이면 여기서 바로 INSERT 말고, 청크(예: 5000개) 단위로 배치 INSERT 권장
+//            int inserted = apisDataService.insertBusStopLocations(totalData);
+//            // log.info("총 수집: {}건, 삽입: {}건", total.size(), inserted);
+//
+//        } catch (Exception e) {
+//            log.error("busInfo 수집 실패", e);
+//        }
+//    }     
     /**
      * 공공데이터포털에서 국토교통부_아파트 매매 실거래가 상세 자료 정보 데이터를 DB에 저장하는 기능
      * 대상 데이터 : 아파트 실거래가 속성정보
@@ -676,6 +680,81 @@ public class ApisDataSchedulerController {
             log.error("아파트 전월세 정보 수집 실패", e);
             throw new RuntimeException("아파트 전월세 API 데이터 수집 중 오류 발생", e);
         }
+    }
+
+    /**
+     * 공공데이터포털에서 재정경제부_공공기관 시설정보 자료 데이터를 DB에 저장하는 기능
+     * 대상 데이터 : 공공기관 시설정보
+     * 업데이트 시간 : 매일 08시 00분
+     */
+    @RequestMapping("/apis/fclt/list")
+    //@Scheduled(cron = "0 0 08 * * *")
+    public void fcltList() throws Exception {
+        final int requestPerPage = 1000; // API 최대 요청 제한 건수
+        final String base = "https://apis.data.go.kr/1051000/fclt/list";
+
+        List<Map<String, Object>> allFcltItems = new ArrayList<>(); // 전체 데이터를 담을 리스트
+        int pageNo = 1;
+
+        while (true) {
+            StringBuilder fcltList = new StringBuilder(base)
+                    .append("?serviceKey=").append(apisServiceKey)
+                    .append("&pageNo=").append(pageNo)
+                    .append("&numOfRows=").append(requestPerPage)
+                    .append("&resultType=").append("json");
+            // 페이지별 데이터 조회
+            List<Map<String, Object>> fcltItems = fcltInfoToList(fcltList);
+            // 가져온 데이터가 없거나 비어있으면 반복 종료
+            if (fcltItems == null || fcltItems.isEmpty()) { break; }
+            // 전체 리스트에 누적
+            allFcltItems.addAll(fcltItems);
+            // 요청한 최대 건수(1000건)보다 적게 들어왔다면 마지막 페이지이므로 종료
+            if (fcltItems.size() < requestPerPage) { break; }
+            // 다음 페이지로 이동
+            pageNo++;
+        }
+        // 최종적으로 전체 데이터(allCityItems)를 활용하는 로직 구현
+        log.info("총 수집된 데이터 건수: " + allFcltItems.size());
+
+        if (!allFcltItems.isEmpty()) {
+            apisDataService.insertFcltInfo(allFcltItems);
+            allFcltItems.clear();
+        }
+
+    }
+
+    private static List<Map<String, Object>> fcltInfoToList(StringBuilder urlBuilder) {
+        List<Map<String, Object>> resultData = new ArrayList<>();
+        try {
+            System.out.println("Request URL: " + urlBuilder.toString());
+
+            URI uri = new URI(urlBuilder.toString());
+            URL url = uri.toURL();
+
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.connect();
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+
+            // JSON 파싱
+            Map<String, Object> listMap = new ObjectMapper().readValue(sb.toString(), new TypeReference<Map<String, Object>>() {});
+
+            // 실제 JSON 구조("result")에 맞춰 데이터 추출
+            if (listMap.containsKey("result") && listMap.get("result") != null) {
+                resultData = (List<Map<String, Object>>) listMap.get("result");
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return resultData;
     }
 
     private static List<Map<String, Object>> busRouteInfoToList(StringBuilder urlBuilder){

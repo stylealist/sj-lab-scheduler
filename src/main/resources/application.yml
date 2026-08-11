@@ -37,6 +37,5 @@ management:
 
 apikey:  # 외부 연동 API 키 모음
   safe: ISGUSHVA-ISGU-ISGU-ISGU-ISGUSHVA5T  # 생활안전정보 API
-  apis: o9zW2lZLR06hqlpgGQSjOTtf3jfGdFdrtrxwBM/shNmdqU+tzasq46ZYQasDYVW43Bs+xAXwgmBdxYjH5NLE4Q==
-
+  apis: ChjssyLjxDfEDKqZ7MIj1vyj9qvN8cPzu6zF%2B2unYHoq9dWZh7yUqYrT4gTjUXrg2J3VAms3eb3RHX%2Fpt1XLUg%3D%3D
   its: 7f94df5228ec4eadb1fb9772aad72d70

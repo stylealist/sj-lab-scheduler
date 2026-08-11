@@ -273,6 +273,42 @@ public class ApisDataServiceImpl implements ApisDataService {
         System.out.println("Total Inserted Rents rows: " + inserted);
         return inserted;
     }
+
+    @Override
+    public int insertFcltInfo(List<Map<String, Object>> item) throws Exception {
+        if (item == null || item.isEmpty()) return 0;
+
+        // [STEP 1] Map 데이터를 DTO 리스트로 변환
+        List<FcltInfoDto> allDataToInsert = mapToFcltInfoDtos(item);
+
+        // [STEP 1-1] API 응답 데이터 내 자체 중복 fclt_sn 제거 (DataTypeUtil 활용)
+        allDataToInsert = DataTypeUtil.dedupeBy(allDataToInsert, FcltInfoDto::getFcltSn);
+
+        // [STEP 2] 저장할 데이터가 없으면 종료
+        if (allDataToInsert.isEmpty()) {
+            log.info("저장할 공공시설 데이터가 없습니다.");
+            return 0;
+        }
+
+        log.info(">> 공공시설 저장 시작: 총 " + allDataToInsert.size() + "건 (API 중복 제거 후)");
+
+        // [STEP 3] 배치 Insert (500개씩 분할 저장)
+        final int batchSize = 500;
+        int inserted = 0;
+
+        for (int i = 0; i < allDataToInsert.size(); i += batchSize) {
+            List<FcltInfoDto> chunk = allDataToInsert.subList(i, Math.min(i + batchSize, allDataToInsert.size()));
+
+            // 매퍼 호출 (ON CONFLICT DO NOTHING으로 인해 신규 저장된 건수만 리턴됨)
+            int batchInserted = mapper.insertFcltInfo(chunk);
+            inserted += batchInserted;
+
+            log.info("Inserted Facility rows (batch): " + batchInserted);
+        }
+
+        log.info("Total Inserted Facility rows: " + inserted);
+        return inserted;
+    }
 //    @Override
 //    public int insertAptRents(List<Map<String, Object>> item) throws Exception {
 //        if (item == null || item.isEmpty()) return 0;
@@ -656,5 +692,89 @@ public class ApisDataServiceImpl implements ApisDataService {
             return dto;
         }).collect(Collectors.toList());
     }
+    /**
+     * Map<String, Object> 리스트를 FcltInfoDto 리스트로 변환
+     */
+    private List<FcltInfoDto> mapToFcltInfoDtos(List<Map<String, Object>> list) {
+        if (list == null || list.isEmpty()) return Collections.emptyList();
+
+        return list.stream().map(m -> {
+            FcltInfoDto dto = new FcltInfoDto();
+
+            // 1. 식별자 및 숫자/좌표
+            dto.setFcltSn(toLong(m.get("fcltSn")));
+            dto.setLat(toDouble(m.get("lat")));
+            dto.setLon(toDouble(m.get("lon")));
+
+            // 2. 기관 및 시설 기본 정보
+            dto.setMngInstCd(toStr(m.get("mngInstCd")));
+            dto.setPbadmsStdInstCd(toStr(m.get("pbadmsStdInstCd")));
+            dto.setInstNm(toStr(m.get("instNm")));
+            dto.setFcltNm(toStr(m.get("fcltNm")));
+            dto.setFcltTypeCd(toStr(m.get("fcltTypeCd")));
+            dto.setFcltTypeNm(toStr(m.get("fcltTypeNm")));
+            dto.setFcltTypeFullNm(toStr(m.get("fcltTypeFullNm")));
+
+            // 3. 주소 정보
+            dto.setCtpvNm(toStr(m.get("ctpvNm")));
+            dto.setSggNm(toStr(m.get("sggNm")));
+            dto.setRoadNmAddr(toStr(m.get("roadNmAddr")));
+            dto.setLotnoAddr(toStr(m.get("lotnoAddr")));
+            dto.setDaddr(toStr(m.get("daddr")));
+
+            // 4. 담당자 정보
+            dto.setPicDeptNm(toStr(m.get("picDeptNm")));
+            dto.setPicNm(toStr(m.get("picNm")));
+            dto.setPicTelno(toStr(m.get("picTelno")));
+            dto.setPicEml(toStr(m.get("picEml")));
+
+            // 5. 이용 정보 및 설명
+            dto.setTcbizDayInfo(toStr(m.get("tcbizDayInfo")));
+            dto.setUtztnMthdExpln(toStr(m.get("utztnMthdExpln")));
+            dto.setUtztnTrgtExpln(toStr(m.get("utztnTrgtExpln")));
+            dto.setAcptNopeExpln(toStr(m.get("acptNopeExpln")));
+            dto.setIndrSe(toStr(m.get("indrSe")));
+            dto.setIndrSeExpln(toStr(m.get("indrSeExpln")));
+            dto.setChagfeeYn(toStr(m.get("chagfeeYn")));
+            dto.setUtztnPayExpln(toStr(m.get("utztnPayExpln")));
+
+            // 6. 예약 및 운영 정보
+            dto.setRsvtPsbltyYn(toStr(m.get("rsvtPsbltyYn")));
+            dto.setRsvtMthdExpln(toStr(m.get("rsvtMthdExpln")));
+            dto.setSiteUrl(toStr(m.get("siteUrl")));
+
+            // 7. 운영 시간 정보
+            dto.setWeekdaysTmSe(toStr(m.get("weekdaysTmSe")));
+            dto.setWeekdaysTmExpln(toStr(m.get("weekdaysTmExpln")));
+            dto.setSatTmSe(toStr(m.get("satTmSe")));
+            dto.setSatTmExpln(toStr(m.get("satTmExpln")));
+            dto.setHldyTmSe(toStr(m.get("hldyTmSe")));
+            dto.setHldyTmExpln(toStr(m.get("hldyTmExpln")));
+
+            // 8. 관리감독 및 예약 방법 구분
+            dto.setSprvsnType(toStr(m.get("sprvsnType")));
+            dto.setSprvsnTypeExpln(toStr(m.get("sprvsnTypeExpln")));
+            dto.setSprvsnNm(toStr(m.get("sprvsnNm")));
+
+            dto.setRsvtMthdSiteYn(toStr(m.get("rsvtMthdSiteYn")));
+            dto.setRsvtMthdTelYn(toStr(m.get("rsvtMthdTelYn")));
+            dto.setRsvtMthdEmlYn(toStr(m.get("rsvtMthdEmlYn")));
+            dto.setRsvtMthdDocYn(toStr(m.get("rsvtMthdDocYn")));
+            dto.setRsvtMthdEtcYn(toStr(m.get("rsvtMthdEtcYn")));
+            dto.setRsvtMthdEtcExpln(toStr(m.get("rsvtMthdEtcExpln")));
+
+            // 9. 첨부파일 (JSON 변환 또는 String 저장)
+            Object filesObj = m.get("files");
+            if (filesObj != null) {
+                // Jackson / Gson 등의 라이브러리로 JSON String 변환 후 저장 권장
+                // 예: dto.setFiles(objectMapper.writeValueAsString(filesObj));
+                dto.setFiles(filesObj.toString());
+            }
+
+            return dto;
+        }).collect(Collectors.toList());
+    }
+
+
 
 }
