@@ -757,9 +757,9 @@ public class ApisDataSchedulerController {
         return resultData;
     }
 
-    private static List<Map<String, Object>> busRouteInfoToList(StringBuilder urlBuilder){
+    private static List<Map<String, Object>> busRouteInfoToList(StringBuilder urlBuilder) {
         List<Map<String, Object>> resultData = new ArrayList<>();
-        try{
+        try {
             System.out.println("Request URL: " + urlBuilder.toString());
 
             URI uri = new URI(urlBuilder.toString());
@@ -776,7 +776,7 @@ public class ApisDataSchedulerController {
             while ((line = reader.readLine()) != null) {
                 sb.append(line);
             }
-            Map<String, Object> listMap = new ObjectMapper().readValue(sb.toString(), new TypeReference<Map<String, Object>>() {});
+            Map<String, Object> listMap = new ObjectMapper().readValue(sb.toString(), new TypeReference<>() {});
             Map<String, Object> apisData = (Map<String, Object>) listMap.get("response");
             Map<String, Object> body = (Map<String, Object>) apisData.get("body");
 

@@ -24,4 +24,6 @@ public interface ApisDataMapper {
     int countAptRents(AptRentsInfoDto param);
     List<String> insertAptRents(@Param("list") List<AptRentsInfoDto> list);
     int insertFcltInfo(@Param("list") List<FcltInfoDto> list);
+    void insertFcltInfoGeoJson();
+    void createFcltInfoView();
 }

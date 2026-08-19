@@ -609,4 +609,64 @@
         -- fclt_sn이 이미 존재하는 경우 저장하지 않고 건너뜀
         ON CONFLICT (fclt_sn) DO NOTHING
     </insert>
+    <select id="createFcltInfoView">
+        CREATE OR REPLACE VIEW "map".v_fclt_info
+        AS
+        SELECT
+        fclt_nm,
+        inst_nm,
+        fclt_type_full_nm,
+        lotno_addr,
+        daddr,
+        pic_dept_nm,
+        pic_nm,
+        pic_telno,
+        pic_eml,
+        geom
+        FROM map.facility_info
+        WHERE geom IS NOT NULL
+    </select>
+    <select id="insertFcltInfoGeoJson">
+        CREATE OR REPLACE VIEW "map".v_fclt_info_geojson
+        AS WITH dedup AS (
+        SELECT DISTINCT ON (facility_info.lon, facility_info.lat)
+        facility_info.id,
+        facility_info.fclt_nm,
+        facility_info.inst_nm,
+        facility_info.fclt_type_full_nm,
+        facility_info.lotno_addr,
+        facility_info.daddr,
+        facility_info.pic_dept_nm,
+        facility_info.pic_nm,
+        facility_info.pic_telno,
+        facility_info.pic_eml,
+        facility_info.geom
+        FROM map.facility_info
+        WHERE facility_info.geom IS NOT NULL
+        ORDER BY facility_info.lon, facility_info.lat, facility_info.id DESC
+        ), feat AS (
+        SELECT json_build_object(
+        'type', 'Feature',
+        'id', 'map:facility_info.'::text || dedup.id::text,
+        'geometry', st_asgeojson(dedup.geom)::json,
+        'properties', json_build_object(
+        'fclt_nm', dedup.fclt_nm,
+        'inst_nm', dedup.inst_nm,
+        'fclt_type_full_nm', dedup.fclt_type_full_nm,
+        'lotno_addr', dedup.lotno_addr,
+        'daddr', dedup.daddr,
+        'pic_dept_nm', dedup.pic_dept_nm,
+        'pic_nm', dedup.pic_nm,
+        'pic_telno', dedup.pic_telno,
+        'pic_eml', dedup.pic_eml
+        )
+        ) AS feature
+        FROM dedup
+        )
+        SELECT json_build_object(
+        'type', 'FeatureCollection',
+        'features', COALESCE(json_agg(feature), '[]'::json)
+        ) AS geojson
+        FROM feat
+    </select>
 </mapper>
