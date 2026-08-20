@@ -311,9 +311,9 @@ public class ApisDataServiceImpl implements ApisDataService {
         // [STEP 4] 데이터 적재 완료 후 GeoJSON 뷰 생성(또는 갱신) 실행
         try {
             mapper.createFcltInfoView();
-            log.info(">> 공공시설 GeoJSON 뷰(v_fclt_info) 생성/갱신 완료");
+            log.info(">> 공공시설 뷰(v_fclt_info) 생성/갱신 완료");
         } catch (Exception e) {
-            log.error(">> 공공시설 GeoJSON 뷰 생성 중 오류 발생: ", e);
+            log.error(">> 공공시설 뷰 생성 중 오류 발생: ", e);
             // 필요에 따라 예외를 던지거나 로그만 남길 수 있습니다.
         }
         return inserted;

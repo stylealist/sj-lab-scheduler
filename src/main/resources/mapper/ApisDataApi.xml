@@ -613,15 +613,26 @@
         CREATE OR REPLACE VIEW "map".v_fclt_info
         AS
         SELECT
+        fclt_sn,
         fclt_nm,
         inst_nm,
-        fclt_type_full_nm,
         lotno_addr,
         daddr,
         pic_dept_nm,
         pic_nm,
         pic_telno,
         pic_eml,
+        NULL AS photo_1,
+        NULL AS photo_2,
+        NULL AS photo_3,
+        NULL AS photo_4,
+        NULL AS photo_5,
+        NULL AS audio_memo,
+        NULL AS video,
+        NULL AS facility_condition,
+        NULL AS repair_required_yn,
+        NULL AS facility_memo,
+        NULL AS inspected_at,
         geom
         FROM map.facility_info
         WHERE geom IS NOT NULL

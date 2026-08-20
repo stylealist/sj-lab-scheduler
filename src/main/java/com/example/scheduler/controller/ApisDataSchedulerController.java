@@ -687,8 +687,8 @@ public class ApisDataSchedulerController {
      * 대상 데이터 : 공공기관 시설정보
      * 업데이트 시간 : 매일 08시 00분
      */
-    //@RequestMapping("/apis/fclt/list")
-    @Scheduled(cron = "0 0 08 * * *")
+    @RequestMapping("/apis/fclt/list")
+    //@Scheduled(cron = "0 0 08 * * *")
     public void fcltList() throws Exception {
         final int requestPerPage = 1000; // API 최대 요청 제한 건수
         final String base = "https://apis.data.go.kr/1051000/fclt/list";
