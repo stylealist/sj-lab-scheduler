@@ -72,3 +72,7 @@ Spring Boot 3.3.2 기반 REST + 스케줄러 서비스. 공공데이터포털, �
 - `SecurityConfig`는 CSRF만 비활성화하고 `h2-console` 경로만 인증 예외 처리할 뿐, 그 외 엔드포인트에 대한 인증/인가 설정이 없어 사실상 전체 오픈 상태다.
 - 예외 처리가 `log.error` 대신 `e.printStackTrace()`로만 끝나는 메서드가 다수 섞여 있다(`DataConverter`의 일부 경로, 각 컨트롤러의 private XML/JSON 파서들). 신규 코드는 `log.error`로 통일할 것.
 - 컨트롤러 클래스 전체에 `@Transactional`이 걸려 있는데, 메서드 본문이 분(단위)이 걸릴 수 있는 외부 API 다중 페이지 호출을 포함한다. DB 커넥션을 불필요하게 오래 점유할 수 있으므로, 새 배치를 만들 때는 외부 호출과 DB insert 트랜잭션 범위를 분리하는 것을 고려할 것.
+
+## 통합 허브
+
+저장소를 넘나드는 작업(DB → 백엔드 → 디스커버리 → 게이트웨이 → 프론트엔드)의 총괄 기준 저장소는 `C:\developer\workspace\mapservice-rest`입니다. 시스템 전체 구조·API 계약은 그 저장소의 `docs/system-architecture.md`, 로컬 포트·기동 순서·CORS는 `docs/dev-environment.md`에 있고, MCP(GitHub/DB)와 로컬 비밀값도 그 저장소에서만 관리합니다.
