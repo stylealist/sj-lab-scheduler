@@ -58,7 +58,7 @@ Spring Boot 3.3.2 기반 REST + 스케줄러 서비스. 공공데이터포털, �
 | 약국 | `ApisDataSchedulerController.pharmacy` | 매일 01:20 | |
 | 병원 | `ApisDataSchedulerController.hospital` | 매일 01:40 | |
 | 관공서 | `SafemapSchedulerController.governmentOffice` | 매일 02:00 | |
-| CCTV | `ItsDataSchedulerController.cctvInfo` | 매일 06:00 | |
+| CCTV | `ItsDataSchedulerController.cctvInfo` | 매일 06:00 | **서버 기동 시에도 1회 자동 실행**(`config/CctvStartupRunner`, `ApplicationReadyEvent`) — CCTV 스트리밍 URL이 주기적으로 갱신돼야 재생되므로, 다음 06:00까지 기다리지 않게 함 |
 | 아파트 매매 | `ApisDataSchedulerController.aptTrades` | 매일 06:00 | 이번 달+저번 달 재조회 |
 | 아파트 전월세 | `ApisDataSchedulerController.aptRents` | 매일 07:00 | 이번 달+저번 달 재조회 |
 | 공공기관 시설정보 | `ApisDataSchedulerController.fcltList` | 수동(`/apis/fclt/list`), cron 주석 처리됨 | 08:00 예정이었으나 현재 비활성 |
