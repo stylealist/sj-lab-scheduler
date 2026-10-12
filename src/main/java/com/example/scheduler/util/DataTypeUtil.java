@@ -54,17 +54,17 @@ public final class DataTypeUtil {
     /* ========= Numbers ========= */
 
     public static Integer i(Object o) {
-        String v = s(o); if (isBlank(v)) return null;
+        String v = numeric(s(o)); if (isBlank(v)) return null;   // 쉼표 포함 금액 대응(numeric 주석 참고)
         try { return Integer.valueOf(v); } catch (Exception e) { return null; }
     }
 
     public static Long l(Object o) {
-        String v = s(o); if (isBlank(v)) return null;
+        String v = numeric(s(o)); if (isBlank(v)) return null;   // 쉼표 포함 금액 대응(numeric 주석 참고)
         try { return Long.valueOf(v); } catch (Exception e) { return null; }
     }
 
     public static Double d(Object o) {
-        String v = s(o); if (isBlank(v)) return null;
+        String v = numeric(s(o)); if (isBlank(v)) return null;   // 쉼표 포함 금액 대응(numeric 주석 참고)
         try { return Double.valueOf(v); } catch (Exception e) { return null; }
     }
 
@@ -146,9 +146,24 @@ public final class DataTypeUtil {
         if (list == null) return List.of();
         return list.stream().filter(Objects::nonNull).collect(Collectors.toList());
     }
-    public static Integer toInt(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:Integer.valueOf(s);}catch(Exception e){return null;}}
-    public static Long toLong(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:Long.valueOf(s);}catch(Exception e){return null;}}
-    public static BigDecimal toDecimal(Object o){ try{ var s=String.valueOf(o); return (s==null||s.isBlank())?null:new BigDecimal(s);}catch(Exception e){return null;}}
+    /**
+     * 숫자 변환 전에 공백과 천 단위 쉼표를 떼어 낸다.
+     *
+     * <p>공공데이터포털은 금액을 "85,000" 처럼 쉼표가 들어간 문자열로 준다. 쉼표를 떼지 않으면
+     * 숫자 변환이 실패해 **조용히 null** 이 되고, 1,000 미만(쉼표 없는 값)만 저장된다.
+     * 실제로 전월세 보증금·월세가 그렇게 들어가 2026-10-12 에 발견됐다
+     * (전월세 2026년 53만 건 중 보증금이 들어간 것은 6.4%, 최댓값 999).
+     * 매매 금액만 호출부에서 따로 쉼표를 떼고 있어 멀쩡했다.
+     */
+    private static String numeric(Object o) {
+        if (o == null) return null;
+        String v = String.valueOf(o).trim().replace(",", "");
+        return (v.isEmpty() || "null".equals(v)) ? null : v;
+    }
+
+    public static Integer toInt(Object o){ try{ var s=numeric(o); return s==null?null:Integer.valueOf(s);}catch(Exception e){return null;}}
+    public static Long toLong(Object o){ try{ var s=numeric(o); return s==null?null:Long.valueOf(s);}catch(Exception e){return null;}}
+    public static BigDecimal toDecimal(Object o){ try{ var s=numeric(o); return s==null?null:new BigDecimal(s);}catch(Exception e){return null;}}
     /**
      * Object -> Double 안전 변환
      * Null이거나, 공백이거나, 변환 불가능한 값이면 null을 반환하여 에러 방지
