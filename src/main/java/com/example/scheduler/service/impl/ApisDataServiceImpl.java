@@ -154,58 +154,18 @@ public class ApisDataServiceImpl implements ApisDataService {
     public int insertAptTrades(List<Map<String, Object>> item) throws Exception {
         if (item == null || item.isEmpty()) return 0;
 
-        // [중요] 전체 30일 치 데이터를 모을 바구니를 반복문 '밖'에 만듭니다.
-        List<AptTradesInfoDto> allDataToInsert = new ArrayList<>();
-
-        LocalDate today = LocalDate.now();
-        int minusDay = 30; // 30일 전부터 검사
-
-        // [STEP 1] 30일간 루프를 돌며 넣을 데이터를 수집(Collect)
-        while (minusDay > 0) {
-            // 날짜 계산
-            LocalDate targetDate = today.minusDays(minusDay);
-            int targetYear = targetDate.getYear();
-            int targetMonth = targetDate.getMonthValue();
-            int targetDay = targetDate.getDayOfMonth();
-
-            // 반복 횟수 줄이기 (맨 끝이나 맨 처음에 해도 되지만 누락 주의)
-            minusDay--;
-
-            // 1-1. DB에 해당 날짜 데이터가 있는지 확인
-            AptTradesInfoDto aptTradesInfoDto = new AptTradesInfoDto();
-            aptTradesInfoDto.setDealYear(targetYear);
-            aptTradesInfoDto.setDealMonth(targetMonth);
-            aptTradesInfoDto.setDealDay(targetDay);
-
-            int count = mapper.countAptTrades(aptTradesInfoDto);
-
-            // [핵심] 데이터가 이미 있으면(count > 0) 이 날짜는 건너뜀(Skip)
-            if (count > 0) {
-                System.out.println(targetDate + " 데이터는 이미 존재하여 건너뜁니다.");
-                continue; // break가 아니라 continue를 써야 다음 날짜로 넘어갑니다.
-            }
-
-            // 1-2. 전체 리스트(item)에서 해당 날짜 데이터만 걸러내기
-            List<Map<String, Object>> filteredItems = item.stream()
-                    .filter(map -> {
-                        int y = toInt(map.get("dealYear"));
-                        int m = toInt(map.get("dealMonth"));
-                        int d = toInt(map.get("dealDay"));
-                        return y == targetYear && m == targetMonth && d == targetDay;
-                    })
-                    .collect(Collectors.toList());
-
-            // 해당 날짜에 API 데이터도 없다면 다음 날짜로 진행
-            if (filteredItems.isEmpty()) {
-                continue;
-            }
-
-            // 1-3. DTO 변환 후 '전체 바구니'에 담기
-            List<AptTradesInfoDto> dailyDtos = mapToAptTradesDtos(filteredItems);
-            if (dailyDtos != null && !dailyDtos.isEmpty()) {
-                allDataToInsert.addAll(dailyDtos); // 여기서 차곡차곡 쌓습니다.
-            }
-        }
+        // 받아온 응답을 그대로 적재한다. 중복은 DB가 막는다
+        // (estate.apt_trade 의 유니크 인덱스 ux_apt_trade_natural + 매퍼의 ON CONFLICT DO NOTHING).
+        //
+        // [2026-10-06 변경] 전에는 여기서 "오늘로부터 30일 안의 거래일"만 골라 넣고,
+        // 그 날짜가 DB에 하나라도 있으면 그 날 전체를 건너뛰었다. 두 가지가 문제였다.
+        //   1) 30일보다 오래된 달은 응답을 받아 와도 전부 버려져 백필이 아예 불가능했다
+        //      (실측: 2026-05~08 은 API 가 데이터를 주는데도 적재 0건).
+        //   2) 날짜 중복 검사(countAptTrades)가 시군구를 구분하지 않아, 한 구가 그 날짜를
+        //      먼저 넣으면 나머지 구의 같은 날짜 데이터가 통째로 건너뛰어질 수 있었다.
+        // 둘 다 중복을 막으려고 넣은 장치였는데, 지금은 유니크 인덱스가 정확히 그 일을 한다.
+        // 전월세(insertAptRents)는 같은 이유로 이미 이 방식이다.
+        List<AptTradesInfoDto> allDataToInsert = mapToAptTradesDtos(item);
 
         // [STEP 2] 모인 데이터가 하나도 없으면 종료
         if (allDataToInsert.isEmpty()) {

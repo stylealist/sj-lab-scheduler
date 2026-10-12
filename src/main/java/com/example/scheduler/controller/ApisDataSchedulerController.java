@@ -12,6 +12,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -42,6 +43,107 @@ import static com.example.scheduler.util.DataConverter.xmlToList;
 public class ApisDataSchedulerController {
     @Value("${apikey.apis}")
     private String apisServiceKey;
+
+    /**
+     * 공공데이터포털 호출 사이에 쉬는 시간(ms).
+     *
+     * <p>예전에는 페이지 사이에만 50ms 를 쉬고 지역 사이에는 쉬지 않아, 짧은 시간에 수백 건을 쏘다가
+     * <b>429(호출 과다)</b> 에 걸렸다(2026-10-06 백필 중 실제 발생 — 한 지역에 재시도로 1분씩 쓰다가
+     * 결국 건너뛰어 그 달 데이터가 빠졌다). 그래서 간격을 설정값으로 빼고 기본을 넉넉히 둔다.
+     * 급할 때만 `-Dapis.request-delay-ms=100` 처럼 낮출 것.
+     */
+    @Value("${apis.request-delay-ms:300}")
+    private long requestDelayMs;
+
+    /**
+     * 예비 서비스 키. 주 키의 한도가 떨어졌을 때 대신 쓴다(쉼표로 여러 개도 가능).
+     *
+     * <p><b>한도는 키마다, 그리고 엔드포인트마다 따로 매겨진다</b>(2026-10-07 확인).
+     * 같은 키로 매매는 429 인데 전월세는 200 이 나오고, 다른 키로는 매매도 200 이 나왔다.
+     * 그래서 "키가 막혔다"를 전체 차단으로 보면 안 되고, <b>쓰려는 엔드포인트마다</b> 확인해야 한다.
+     * 값은 저장소에 적지 말고 환경변수 `APIS_SERVICE_KEY_2` 로 넣을 것(이 저장소는 public).
+     */
+    @Value("${apikey.apis2:}")
+    private String apisServiceKeyAlt;
+
+    /**
+     * 이번 수집에서 쓰기로 고른 키. 한 번의 요청(스레드) 안에서만 유효하다.
+     * 데일리 cron 과 백필이 동시에 돌 수 있어 인스턴스 필드로 두면 서로 덮어쓴다.
+     */
+    private final ThreadLocal<String> activeServiceKey = new ThreadLocal<>();
+
+    /** 설정된 키 목록(주 키 → 예비 키). 빈 값·중복은 버린다. */
+    private List<String> candidateServiceKeys() {
+        List<String> keys = new ArrayList<>();
+        for (String raw : (apisServiceKey + "," + apisServiceKeyAlt).split(",")) {
+            String key = raw == null ? "" : raw.trim();
+            if (!key.isEmpty() && !keys.contains(key)) {
+                keys.add(key);
+            }
+        }
+        return keys;
+    }
+
+    /**
+     * 수집을 시작하기 전에 <b>그 엔드포인트에서 실제로 되는 키</b>를 골라 둔다.
+     *
+     * <p>한 건만 요청해 보고 응답이 오면 그 키를 쓴다. 한도가 떨어진 키는 429 를 주므로 다음 키로 넘어간다.
+     * 수백 번 호출하다 중간에 막혀 그 달 데이터가 빠지는 것보다, 시작 전에 1~2번 더 부르는 편이 싸다.
+     * 되는 키가 없으면 주 키를 그대로 쓴다 — 그러면 수집이 429 로 건너뛰고, 그 사실이 `skipped` 로 올라가
+     * 백필 드라이버가 기다렸다 다시 시도한다(조용히 넘어가지 않는다).
+     *
+     * @param baseUrl 쓰려는 엔드포인트. 한도가 엔드포인트별이라 반드시 같은 주소로 확인해야 한다
+     */
+    private void selectServiceKeyFor(String baseUrl) {
+        List<String> keys = candidateServiceKeys();
+        if (keys.size() <= 1) {
+            activeServiceKey.set(keys.isEmpty() ? null : keys.get(0));
+            return;
+        }
+
+        for (int i = 0; i < keys.size(); i++) {
+            String key = keys.get(i);
+            if (probeKey(baseUrl, key)) {
+                if (i > 0) {
+                    log.warn("주 서비스 키의 한도가 떨어져 예비 키 {}번으로 수집합니다: {}", i + 1, baseUrl);
+                } else {
+                    log.info("서비스 키 1번으로 수집합니다: {}", baseUrl);
+                }
+                activeServiceKey.set(key);
+                return;
+            }
+            log.warn("서비스 키 {}번은 이 엔드포인트에서 쓸 수 없습니다(한도 소진 등): {}", i + 1, baseUrl);
+        }
+
+        log.error("설정된 키 {}개가 모두 이 엔드포인트에서 막혀 있습니다: {}", keys.size(), baseUrl);
+        activeServiceKey.set(keys.get(0));
+    }
+
+    /** 키 한 개로 한 건만 요청해 본다. 200 이면 쓸 수 있는 키다. */
+    private boolean probeKey(String baseUrl, String key) {
+        String probeKeyParam = key.contains("%")
+                ? key
+                : URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8);
+        StringBuilder url = new StringBuilder(baseUrl)
+                .append("?serviceKey=").append(probeKeyParam)
+                .append("&LAWD_CD=11110")
+                .append("&DEAL_YMD=").append(LocalDate.now().minusMonths(1).format(DateTimeFormatter.ofPattern("yyyyMM")))
+                .append("&pageNo=1&numOfRows=1");
+        Map<String, Object> response = xmlToList(url);
+        return response != null && !response.isEmpty() && response.get("body") != null;
+    }
+
+    /** 호출 간격 쉬기. 인터럽트는 삼키지 않고 플래그를 되살려 상위 루프가 멈출 수 있게 한다. */
+    private void pauseBetweenCalls() {
+        if (requestDelayMs <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(requestDelayMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
     private static ApisDataService apisDataService;
     private static CommonService commonService;
     public ApisDataSchedulerController(ApisDataService apisDataService,
@@ -54,6 +156,68 @@ public class ApisDataSchedulerController {
         return "test";
     }
     /**
+     * 공공데이터포털에 붙일 serviceKey 를 만든다.
+     *
+     * <p><b>이미 인코딩된 키(% 포함)를 또 인코딩하면 공공데이터포털이 403 을 돌려준다.</b>
+     * 실제로 2025-12 에 그렇게 멈췄다 — 키가 인코딩된 형태로 바뀐 뒤, 키를 무조건
+     * {@code URLEncoder.encode} 하던 수집(약국·병원·아파트 매매·아파트 전월세)이 전부 403 이 되고,
+     * 이 검사를 하던 버스 노선 수집만 계속 동작했다.
+     * 그래서 모든 수집이 이 메서드 하나만 쓰도록 모았다. <b>여기 말고 다른 곳에서 키를 인코딩하지 말 것.</b>
+     */
+    /** 평소 수집 범위 — 이번 달과 지난 달. 실거래 신고가 늦게 들어오므로 지난 달도 다시 받는다. */
+    private List<String> defaultMonths() {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMM");
+        LocalDate now = LocalDate.now();
+        return List.of(now.format(formatter), now.minusMonths(1).format(formatter));
+    }
+
+    /**
+     * 백필용 월 목록(`yyyyMM`)을 만든다. from·to 를 안 주면 {@link #defaultMonths()} 와 같다.
+     * to 를 빼면 이번 달까지, from 을 빼면 to 한 달만 받는다.
+     * 거꾸로 주면(from > to) 바꿔서 쓰고, 형식이 틀리면 그 자리에서 알려 준다.
+     */
+    private List<String> monthRange(String from, String to) {
+        if ((from == null || from.isBlank()) && (to == null || to.isBlank())) {
+            return defaultMonths();
+        }
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMM");
+        YearMonth start = parseMonth(from, YearMonth.now(), formatter);
+        YearMonth end = parseMonth(to, YearMonth.now(), formatter);
+        if (start.isAfter(end)) {
+            YearMonth swap = start;
+            start = end;
+            end = swap;
+        }
+        List<String> months = new ArrayList<>();
+        for (YearMonth m = start; !m.isAfter(end); m = m.plusMonths(1)) {
+            months.add(m.format(formatter));
+        }
+        return months;
+    }
+
+    private YearMonth parseMonth(String raw, YearMonth fallback, DateTimeFormatter formatter) {
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        try {
+            return YearMonth.parse(raw.trim(), formatter);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("기간은 yyyyMM 형식이어야 합니다(예: 202601). 받은 값: " + raw);
+        }
+    }
+
+    private String serviceKeyParam() {
+        // selectServiceKeyFor() 로 고른 키가 있으면 그것을, 없으면 주 키를 쓴다.
+        String key = activeServiceKey.get();
+        if (key == null || key.isEmpty()) {
+            key = apisServiceKey;
+        }
+        return key.contains("%")
+                ? key
+                : URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /**
      * 공공데이터포털에서 버스노선정보 데이터를 DB에 저장하는 기능
      * 대상 레이어 : (CCTV)
      * 업데이트 시간 : 매일 00시 40분
@@ -65,10 +229,7 @@ public class ApisDataSchedulerController {
         final String cityListBase  = "https://apis.data.go.kr/1613000/BusRouteInfoInqireService/getCtyCodeList";
         final String routeListBase = "https://apis.data.go.kr/1613000/BusRouteInfoInqireService/getRouteNoList";
 
-        // 이미 인코딩된 키( % 가 포함 )면 그대로, 아니면 한 번만 인코딩
-        String keyParam = apisServiceKey.contains("%")
-                ? apisServiceKey
-                : URLEncoder.encode(apisServiceKey, java.nio.charset.StandardCharsets.UTF_8);
+        String keyParam = serviceKeyParam();
 
         try {
             /* 1) 도시코드 목록 수집 */
@@ -147,7 +308,7 @@ public class ApisDataSchedulerController {
         try {
             // 1) 첫 페이지 요청
             StringBuilder first = new StringBuilder(base)
-                    .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                    .append("?serviceKey=").append(serviceKeyParam())
                     .append("&pageNo=1")
                     .append("&numOfRows=").append(requestPerPage);
 
@@ -197,7 +358,7 @@ public class ApisDataSchedulerController {
             // 2) 2페이지부터 마지막 페이지까지 수집
             for (int currentPageNo = 2; currentPageNo <= totalPages; currentPageNo++) {
                 StringBuilder urlBuilder = new StringBuilder(base)
-                        .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                        .append("?serviceKey=").append(serviceKeyParam())
                         .append("&pageNo=").append(currentPageNo)
                         .append("&numOfRows=").append(requestPerPage);
 
@@ -263,7 +424,7 @@ public class ApisDataSchedulerController {
         try {
             // 1) 첫 페이지 요청
             StringBuilder first = new StringBuilder(base)
-                    .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                    .append("?serviceKey=").append(serviceKeyParam())
                     .append("&pageNo=1")
                     .append("&numOfRows=").append(requestPerPage);
 
@@ -313,7 +474,7 @@ public class ApisDataSchedulerController {
             // 2) 2페이지부터 마지막 페이지까지 수집
             for (int currentPageNo = 2; currentPageNo <= totalPages; currentPageNo++) {
                 StringBuilder urlBuilder = new StringBuilder(base)
-                        .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                        .append("?serviceKey=").append(serviceKeyParam())
                         .append("&pageNo=").append(currentPageNo)
                         .append("&numOfRows=").append(requestPerPage);
 
@@ -380,7 +541,7 @@ public class ApisDataSchedulerController {
 //        try {
 //            // 1) 첫 페이지
 //            StringBuilder first = new StringBuilder(base)
-//                    .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+//                    .append("?serviceKey=").append(serviceKeyParam())
 //                    .append("&page=1")
 //                    .append("&perPage=").append(requestPerPage)
 //                    .append("&returnType=json");
@@ -409,7 +570,7 @@ public class ApisDataSchedulerController {
 //            // 2) 2 ~ totalPages
 //            for (int pageNo = 2; pageNo <= totalPages; pageNo++) {
 //                StringBuilder urlBuilder = new StringBuilder(base)
-//                        .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+//                        .append("?serviceKey=").append(serviceKeyParam())
 //                        .append("&page=").append(pageNo)
 //                        .append("&perPage=").append(requestPerPage) // 요청은 1000으로 고정
 //                        .append("&returnType=json");
@@ -440,19 +601,52 @@ public class ApisDataSchedulerController {
      * 대상 데이터 : 아파트 실거래가 속성정보
      * 업데이트 시간 : 매일 06시 00분
      */
-    //@RequestMapping("/apis/housing/aptTrades")
     @Scheduled(cron = "0 0 06 * * *")
     public void aptTrades() {
+        collectAptTrades(defaultMonths());
+    }
+
+    /**
+     * 아파트 매매 백필 — 빠진 기간을 손으로 받을 때 쓴다.
+     *
+     * <pre>
+     * GET /scheduler/apis/housing/aptTrades?from=202601&amp;to=202610
+     * </pre>
+     *
+     * 인자를 안 주면 평소(이번 달 + 지난 달)와 같다. 한 번에 긴 기간을 주면
+     * (개월 × 251 시군구 × 페이지) 호출이라 공공데이터포털 일일 트래픽 한도에 걸릴 수 있으니
+     * <b>몇 달씩 나눠</b> 부를 것. 같은 달을 다시 받아도 유니크 인덱스 + ON CONFLICT 로 중복은 안 쌓인다.
+     */
+    @RequestMapping("/apis/housing/aptTrades")
+    public Map<String, Object> aptTradesBackfill(
+            @RequestParam(value = "from", required = false) String from,
+            @RequestParam(value = "to", required = false) String to) {
+        List<String> months = monthRange(from, to);
+        log.info("[매매 백필] 대상 {}개월: {}", months.size(), months);
+        com.example.scheduler.util.DataConverter.resetSkippedCount();
+        int inserted = collectAptTrades(months);
+        int skipped = com.example.scheduler.util.DataConverter.skippedCount();
+        log.info("[매매 백필] 완료 — 새로 적재 {}건", inserted);
+        if (skipped > 0) {
+            log.warn("[{}] 호출 한도 등으로 {}건의 요청을 건너뛰었습니다 — 이 구간은 데이터가 빠졌을 수 있습니다.",
+                    "aptTrades", skipped);
+        }
+        return Map.of("dataset", "aptTrades", "months", months,
+                "monthCount", months.size(), "inserted", inserted, "skipped", skipped);
+    }
+
+    /**
+     * @return 이번 호출로 <b>새로 들어간</b> 행 수. 유니크 인덱스 + ON CONFLICT DO NOTHING 때문에
+     *         이미 있는 거래는 세지 않는다. 과거로 거슬러 가는 백필에서 "이 구간은 더 받을 게 없다"를
+     *         판단하는 기준이 이 값이다(scripts/estate-backfill.ps1).
+     */
+    private int collectAptTrades(List<String> targetMonths) {
+        int insertedTotal = 0;
         final int requestPerPage = 10000;
         final String base = "https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev";
 
-        // 1. 날짜 설정 (이번 달 + 저번 달)
-        LocalDate now = LocalDate.now();
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMM");
-
-        List<String> targetMonths = new ArrayList<>();
-        targetMonths.add(now.format(formatter));               // 이번 달
-        targetMonths.add(now.minusMonths(1).format(formatter)); // 저번 달
+        // 한도는 키마다·엔드포인트마다 따로다. 시작 전에 이 주소에서 되는 키를 골라 둔다.
+        selectServiceKeyFor(base);
 
         try {
             List<SggInfoDto> sggList = commonService.selectSggList();
@@ -469,7 +663,7 @@ public class ApisDataSchedulerController {
 
                     // --- 기존 API 호출 로직 시작 ---
                     StringBuilder first = new StringBuilder(base)
-                            .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                            .append("?serviceKey=").append(serviceKeyParam())
                             .append("&LAWD_CD=").append(lawdCd)
                             .append("&DEAL_YMD=").append(dealYmd) // 수정된 날짜 변수 사용
                             .append("&pageNo=1")
@@ -514,7 +708,7 @@ public class ApisDataSchedulerController {
                     // 2페이지부터 수집
                     for (int currentPageNo = 2; currentPageNo <= totalPages; currentPageNo++) {
                         StringBuilder urlBuilder = new StringBuilder(base)
-                                .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                                .append("?serviceKey=").append(serviceKeyParam())
                                 .append("&LAWD_CD=").append(lawdCd)
                                 .append("&DEAL_YMD=").append(dealYmd)
                                 .append("&pageNo=").append(currentPageNo)
@@ -539,43 +733,73 @@ public class ApisDataSchedulerController {
 
                         sggTotalData.addAll(dataN);
 
-                        try { Thread.sleep(50); } catch (InterruptedException e) { break; }
+                        pauseBetweenCalls();
                     }
                 } // [날짜 루프 종료]
 
-                // [중요] 한 지역(SGG)의 2개월치 데이터 수집이 끝나면 바로 DB에 넣고 메모리 해제
+                // [중요] 한 지역(SGG)의 수집이 끝나면 바로 DB에 넣고 메모리 해제
                 if (!sggTotalData.isEmpty()) {
                     log.info(">> DB 저장 시작: 지역코드 {} (건수: {})", lawdCd, sggTotalData.size());
-                    apisDataService.insertAptTrades(sggTotalData);
+                    insertedTotal += apisDataService.insertAptTrades(sggTotalData);
                     sggTotalData.clear(); // 메모리 확보
                 }
+
+                // 지역을 넘길 때도 쉰다 — 전에는 여기서 안 쉬어 429 에 걸렸다
+                pauseBetweenCalls();
 
             } // [지역 루프 종료]
 
         } catch (Exception e) {
             log.error("아파트 매매 정보 수집 실패", e);
             throw new RuntimeException("아파트 매매 API 데이터 수집 중 오류 발생", e);
+        } finally {
+            activeServiceKey.remove();
         }
+        return insertedTotal;
     }
     /**
      * 공공데이터포털에서 국토교통부_아파트 전월세 자료 데이터를 DB에 저장하는 기능
      * 대상 데이터 : 아파트 전월세 자료
      * 업데이트 시간 : 매일 06시 00분
      */
-    //@RequestMapping("/apis/housing/aptRents")
     @Scheduled(cron = "0 0 07 * * *")
     public void aptRents() {
+        collectAptRents(defaultMonths());
+    }
+
+    /**
+     * 아파트 전월세 백필. 사용법과 주의는 {@link #aptTradesBackfill(String, String)} 와 같다.
+     *
+     * <pre>
+     * GET /scheduler/apis/housing/aptRents?from=202601&amp;to=202610
+     * </pre>
+     */
+    @RequestMapping("/apis/housing/aptRents")
+    public Map<String, Object> aptRentsBackfill(
+            @RequestParam(value = "from", required = false) String from,
+            @RequestParam(value = "to", required = false) String to) {
+        List<String> months = monthRange(from, to);
+        log.info("[전월세 백필] 대상 {}개월: {}", months.size(), months);
+        com.example.scheduler.util.DataConverter.resetSkippedCount();
+        int inserted = collectAptRents(months);
+        int skipped = com.example.scheduler.util.DataConverter.skippedCount();
+        log.info("[전월세 백필] 완료 — 새로 적재 {}건", inserted);
+        if (skipped > 0) {
+            log.warn("[{}] 호출 한도 등으로 {}건의 요청을 건너뛰었습니다 — 이 구간은 데이터가 빠졌을 수 있습니다.",
+                    "aptRents", skipped);
+        }
+        return Map.of("dataset", "aptRents", "months", months,
+                "monthCount", months.size(), "inserted", inserted, "skipped", skipped);
+    }
+
+    /** @return 새로 들어간 행 수. 자세한 설명은 {@link #collectAptTrades(List)} 참고. */
+    private int collectAptRents(List<String> targetMonths) {
+        int insertedTotal = 0;
         final int requestPerPage = 10000; // 요청할 페이지당 건수
-        // [변경] 전월세 API URL
         final String base = "https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent";
 
-        // 1. 날짜 설정 (이번 달 + 저번 달)
-        LocalDate now = LocalDate.now();
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMM");
-
-        List<String> targetMonths = new ArrayList<>();
-        targetMonths.add(now.format(formatter));               // 이번 달
-        targetMonths.add(now.minusMonths(1).format(formatter)); // 저번 달
+        // 한도는 키마다·엔드포인트마다 따로다. 시작 전에 이 주소에서 되는 키를 골라 둔다.
+        selectServiceKeyFor(base);
 
         try {
             List<SggInfoDto> sggList = commonService.selectSggList();
@@ -592,7 +816,7 @@ public class ApisDataSchedulerController {
 
                     // --- API 호출 로직 ---
                     StringBuilder first = new StringBuilder(base)
-                            .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                            .append("?serviceKey=").append(serviceKeyParam())
                             .append("&LAWD_CD=").append(lawdCd)
                             .append("&DEAL_YMD=").append(dealYmd)
                             .append("&pageNo=1")
@@ -637,7 +861,7 @@ public class ApisDataSchedulerController {
                     // 2페이지부터 수집
                     for (int currentPageNo = 2; currentPageNo <= totalPages; currentPageNo++) {
                         StringBuilder urlBuilder = new StringBuilder(base)
-                                .append("?serviceKey=").append(URLEncoder.encode(apisServiceKey, "UTF-8"))
+                                .append("?serviceKey=").append(serviceKeyParam())
                                 .append("&LAWD_CD=").append(lawdCd)
                                 .append("&DEAL_YMD=").append(dealYmd)
                                 .append("&pageNo=").append(currentPageNo)
@@ -662,7 +886,7 @@ public class ApisDataSchedulerController {
 
                         sggTotalData.addAll(dataN);
 
-                        try { Thread.sleep(50); } catch (InterruptedException e) { break; }
+                        pauseBetweenCalls();
                     }
                 } // [날짜 루프 종료]
 
@@ -670,16 +894,22 @@ public class ApisDataSchedulerController {
                 if (!sggTotalData.isEmpty()) {
                     log.info(">> DB 저장 시작 (전월세): 지역코드 {} (건수: {})", lawdCd, sggTotalData.size());
                     // [변경] 전월세 전용 Insert 메서드 호출
-                    apisDataService.insertAptRents(sggTotalData);
+                    insertedTotal += apisDataService.insertAptRents(sggTotalData);
                     sggTotalData.clear();
                 }
+
+                // 지역을 넘길 때도 쉰다 — 전에는 여기서 안 쉬어 429 에 걸렸다
+                pauseBetweenCalls();
 
             } // [지역 루프 종료]
 
         } catch (Exception e) {
             log.error("아파트 전월세 정보 수집 실패", e);
             throw new RuntimeException("아파트 전월세 API 데이터 수집 중 오류 발생", e);
+        } finally {
+            activeServiceKey.remove();
         }
+        return insertedTotal;
     }
 
     /**

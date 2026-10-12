@@ -42,12 +42,27 @@ Spring Boot 3.3.2 기반 REST + 스케줄러 서비스. 공공데이터포털, �
 ### DB 스키마
 
 - `map.*`: 버스노선/정류장, 편의점, 관공서, 공공시설 등 지리정보(PostGIS 좌표 포함)
-- `ai.*`: 아파트 매매(`apt_trades`)/전월세(`apt_rents`) 실거래가
+- `estate.*`: 아파트 매매(`apt_trade`)/전월세(`apt_rent`) 실거래가 — **2026-10-06에 `ai.apt_trades`/`apt_rents`에서 이전**.
+  `ai` 스키마는 앞으로 AI/RAG 관련 표만 둔다. 생성 스크립트는 `sj-lab/db/estate/estate_apt.sql`(담당자 실행).
+  두 표에는 자연키 유니크 인덱스(`NULLS NOT DISTINCT`)가 있고 매퍼가 `ON CONFLICT DO NOTHING`이므로
+  **같은 달을 다시 받아도 중복이 쌓이지 않는다** — 이게 백필의 전제다.
 
 ## 참고: 인증키·URL 인코딩 주의사항
 
 - 외부 연동 키(`apikey.safe`/`apikey.apis`/`apikey.its`)는 `application.yml`에 값이 박혀 있고 `@Value`로 주입해서 쓴다.
-- `apikey.apis` 값은 이미 URL 인코딩된 형태로 저장돼 있다. `ApisDataSchedulerController.busRouteInfo()`는 `apisServiceKey.contains("%")`로 기인코딩 여부를 분기해서 이중 인코딩을 피하지만, 같은 컨트롤러의 다른 메서드(`pharmacy`, `hospital`, `aptTrades`, `aptRents`)는 항상 `URLEncoder.encode(apisServiceKey, "UTF-8")`를 다시 호출한다 — 이미 인코딩된 키를 한 번 더 인코딩하면 `%`가 `%25`로 깨져 API 호출이 실패할 수 있으니, 새 코드 작성 시 어느 방식이 맞는지 반드시 확인 후 맞출 것.
+- `apikey.apis` 값은 **이미 URL 인코딩된 형태**로 저장돼 있다. 한 번 더 인코딩하면 `%`가 `%25`로 깨져
+  공공데이터포털이 **403**을 돌려준다.
+- **이 문서가 경고했던 그대로 실제 사고가 났다(2026-10-06 발견).** `pharmacy`·`hospital`·`aptTrades`·`aptRents`가
+  키를 무조건 `URLEncoder.encode` 해서 **2025-12부터 수집이 전부 멈춰 있었다**(기인코딩 분기가 있던
+  `busRouteInfo`만 살아남아 "아파트만 멈춘 것"처럼 보였다).
+- **고친 뒤 규칙: 키 인코딩은 `ApisDataSchedulerController.serviceKeyParam()` 하나만 쓴다.**
+  다른 곳에서 `URLEncoder.encode(apisServiceKey, ...)`를 새로 호출하지 말 것.
+- `DataConverter.xmlToList()`도 같은 작업에서 고쳤다. 함께 지킬 것.
+  - **연결 10초·읽기 30초 타임아웃**을 뺀 채로 두지 말 것 — 없었을 때 호출 제한에 걸린 뒤 응답이 끊기면
+    스레드가 **영구히 대기**해 수집이 40분간 멎었다.
+  - **429·5xx는 2→8→18→32초 백오프로 최대 4회 재시도**한다. 빈 결과로 넘기면 호출한 쪽이
+    "그 달에 데이터가 없다"로 받아들여 그 구간을 **조용히 건너뛴다**.
+  - 로그에 주소를 남길 때 `serviceKey=***`로 가린다(전에는 평문으로 찍혔다).
 
 ## 참고: 도메인별 스케줄 시각(cron)
 
@@ -59,12 +74,26 @@ Spring Boot 3.3.2 기반 REST + 스케줄러 서비스. 공공데이터포털, �
 | 병원 | `ApisDataSchedulerController.hospital` | 매일 01:40 | |
 | 관공서 | `SafemapSchedulerController.governmentOffice` | 매일 02:00 | |
 | CCTV | `ItsDataSchedulerController.cctvInfo` | 매일 06:00 | **서버 기동 시에도 1회 자동 실행**(`config/CctvStartupRunner`, `ApplicationReadyEvent`) — CCTV 스트리밍 URL이 주기적으로 갱신돼야 재생되므로, 다음 06:00까지 기다리지 않게 함 |
-| 아파트 매매 | `ApisDataSchedulerController.aptTrades` | 매일 06:00 | 이번 달+저번 달 재조회 |
-| 아파트 전월세 | `ApisDataSchedulerController.aptRents` | 매일 07:00 | 이번 달+저번 달 재조회 |
+| 아파트 매매 | `ApisDataSchedulerController.aptTrades` | 매일 06:00 | 이번 달+저번 달 재조회. 백필은 `/apis/housing/aptTrades?from=202601&to=202603` |
+| 아파트 전월세 | `ApisDataSchedulerController.aptRents` | 매일 07:00 | 이번 달+저번 달 재조회. 백필은 `/apis/housing/aptRents?from=&to=` |
 | 공공기관 시설정보 | `ApisDataSchedulerController.fcltList` | 수동(`/apis/fclt/list`), cron 주석 처리됨 | 08:00 예정이었으나 현재 비활성 |
 | 버스정류장 위치 | (주석 처리됨) | - | 공공데이터포털 스펙 변경으로 엑셀 다운로드 방식 전환 필요 |
 
 새 스케줄을 추가/변경할 때는 다른 작업과 겹치지 않는 시간대인지 이 표를 기준으로 확인하고, 표도 함께 갱신할 것.
+
+### 아파트 실거래 백필 (과거 기간 받기)
+
+`from`·`to`(`yyyyMM`)를 주면 그 기간을 받는다. 인자가 없으면 평소(이번 달+지난 달)와 같다.
+과거로 거슬러 가며 받는 일은 `sj-lab/scripts/estate-backfill.ps1`이 한다 — 6개월(또는 `-chunkMonths`)씩
+내려가며 **"새로 들어간 건수가 12개월 연속 0"이면 멈춘다**. 진행 상황은 `.local-stack/estate-backfill.json`에
+남아 중간에 끊겨도 이어서 간다. 진행 보기는 `estate-backfill-watch.ps1`.
+
+- 응답은 `{"dataset","months","monthCount","inserted"}`이며 `inserted`가 **새로 들어간 행 수**다
+  (이미 있는 거래는 유니크 인덱스가 걸러 세지 않는다). 멈춤 판단이 이 값에 달려 있으므로 반환을 없애지 말 것.
+- **`insertAptTrades`의 "최근 30일만 적재" 필터는 2026-10-06에 제거했다.** 그게 있는 동안에는
+  30일보다 오래된 달을 받아 와도 전부 버려져 백필이 **아예 불가능**했다(실측: 2026-05~08 응답은 있는데 적재 0건).
+  날짜 중복 검사(`countAptTrades`)도 시군구를 구분하지 않아 한 구가 넣은 날짜를 다른 구가 통째로
+  건너뛸 수 있었다. 둘 다 중복 방지 장치였는데 지금은 유니크 인덱스가 그 일을 정확히 한다 — **되살리지 말 것.**
 
 ## 참고: 보안/코드 품질상 알려진 이슈
 
