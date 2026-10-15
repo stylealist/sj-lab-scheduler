@@ -388,6 +388,149 @@
         ) AS geojson
         FROM feat
     </select>
+    <!--
+      ══════════════════ 단지 마스터(estate.apt_complex) — 지도용 좌표 ══════════════════
+      실거래 API 는 좌표를 주지 않는다. 지도에 핀을 찍으려면 주소를 좌표로 바꿔 보관해야 하고,
+      거래 2,100만 건이 아니라 **단지 4.5만 개**만 구하면 apt_seq 로 모든 거래에 붙는다.
+      표 정의는 sj-lab/db/estate/estate_apt_complex.sql (DDL 은 담당자가 실행).
+    -->
+
+    <!--
+      거래 표에서 단지를 긁어 넣는다(좌표는 비운 채). 이미 있으면 주소·건수만 갱신하고
+      **좌표와 지오코딩 상태는 건드리지 않는다** — 다시 돌려도 받아 둔 좌표가 날아가지 않게.
+      distinct on (apt_seq) 로 단지마다 한 행만 고른다(가장 최근 거래 기준).
+    -->
+    <insert id="syncAptComplexFromTrade">
+        INSERT INTO estate.apt_complex (
+            apt_seq, sgg_cd, umd_cd, umd_nm, land_cd, bonbun, bubun, jibun,
+            road_nm, road_nm_sgg_cd, road_nm_cd, road_nmb_cd, road_nm_bonbun, road_nm_bubun,
+            apt_nm, build_year, trade_count
+        )
+        SELECT s.apt_seq, s.sgg_cd, s.umd_cd, s.umd_nm, s.land_cd, s.bonbun, s.bubun, s.jibun,
+               s.road_nm, s.road_nm_sgg_cd, s.road_nm_cd, s.road_nmb_cd, s.road_nm_bonbun, s.road_nm_bubun,
+               s.apt_nm, s.build_year, s.trade_count
+        FROM (
+            SELECT DISTINCT ON (t.apt_seq)
+                   t.apt_seq, t.sgg_cd, t.umd_cd, t.umd_nm, t.land_cd, t.bonbun, t.bubun, t.jibun,
+                   t.road_nm, t.road_nm_sgg_cd, t.road_nm_cd, t.road_nmb_cd,
+                   t.road_nm_bonbun, t.road_nm_bubun, t.apt_nm, t.build_year,
+                   count(*) OVER (PARTITION BY t.apt_seq) AS trade_count
+            FROM estate.apt_trade t
+            WHERE t.apt_seq IS NOT NULL
+            <if test="sggCd != null and sggCd != ''">
+                AND t.sgg_cd = #{sggCd}
+            </if>
+            ORDER BY t.apt_seq, t.deal_year DESC, t.deal_month DESC, t.deal_day DESC
+        ) s
+        ON CONFLICT (apt_seq) DO UPDATE SET
+            umd_cd         = COALESCE(EXCLUDED.umd_cd, estate.apt_complex.umd_cd),
+            umd_nm         = COALESCE(EXCLUDED.umd_nm, estate.apt_complex.umd_nm),
+            land_cd        = COALESCE(EXCLUDED.land_cd, estate.apt_complex.land_cd),
+            bonbun         = COALESCE(EXCLUDED.bonbun, estate.apt_complex.bonbun),
+            bubun          = COALESCE(EXCLUDED.bubun, estate.apt_complex.bubun),
+            jibun          = COALESCE(EXCLUDED.jibun, estate.apt_complex.jibun),
+            road_nm        = COALESCE(EXCLUDED.road_nm, estate.apt_complex.road_nm),
+            road_nm_sgg_cd = COALESCE(EXCLUDED.road_nm_sgg_cd, estate.apt_complex.road_nm_sgg_cd),
+            road_nm_cd     = COALESCE(EXCLUDED.road_nm_cd, estate.apt_complex.road_nm_cd),
+            road_nmb_cd    = COALESCE(EXCLUDED.road_nmb_cd, estate.apt_complex.road_nmb_cd),
+            road_nm_bonbun = COALESCE(EXCLUDED.road_nm_bonbun, estate.apt_complex.road_nm_bonbun),
+            road_nm_bubun  = COALESCE(EXCLUDED.road_nm_bubun, estate.apt_complex.road_nm_bubun),
+            apt_nm         = COALESCE(EXCLUDED.apt_nm, estate.apt_complex.apt_nm),
+            build_year     = COALESCE(EXCLUDED.build_year, estate.apt_complex.build_year),
+            trade_count    = EXCLUDED.trade_count,
+            update_at      = now()
+    </insert>
+
+    <!--
+      전월세에만 있는 단지도 넣는다(3,069개). 전월세 표에는 umd_cd 가 없어 법정동코드를 만들 수
+      없으므로, 그 단지들은 지번 문자열로 좌표를 받는다(VWorld 경로).
+    -->
+    <insert id="syncAptComplexFromRent">
+        INSERT INTO estate.apt_complex (
+            apt_seq, sgg_cd, umd_nm, jibun,
+            road_nm, road_nm_sgg_cd, road_nm_cd, road_nmb_cd, road_nm_bonbun, road_nm_bubun,
+            apt_nm, build_year, rent_count
+        )
+        SELECT s.apt_seq, s.sgg_cd, s.umd_nm, s.jibun,
+               s.road_nm, s.road_nm_sgg_cd, s.road_nm_cd, s.road_nmb_cd, s.road_nm_bonbun, s.road_nm_bubun,
+               s.apt_nm, s.build_year, s.rent_count
+        FROM (
+            SELECT DISTINCT ON (r.apt_seq)
+                   r.apt_seq, r.sgg_cd, r.umd_nm, r.jibun,
+                   r.road_nm, r.road_nm_sgg_cd, r.road_nm_cd, r.road_nmb_cd,
+                   r.road_nm_bonbun, r.road_nm_bubun, r.apt_nm, r.build_year,
+                   count(*) OVER (PARTITION BY r.apt_seq) AS rent_count
+            FROM estate.apt_rent r
+            WHERE r.apt_seq IS NOT NULL
+            <if test="sggCd != null and sggCd != ''">
+                AND r.sgg_cd = #{sggCd}
+            </if>
+            ORDER BY r.apt_seq, r.deal_year DESC, r.deal_month DESC, r.deal_day DESC
+        ) s
+        ON CONFLICT (apt_seq) DO UPDATE SET
+            rent_count = EXCLUDED.rent_count,
+            update_at  = now()
+    </insert>
+
+    <!-- 아직 좌표를 못 받은 단지. 거래가 많은 단지부터 받는다(화면에 먼저 보일 곳). -->
+    <select id="selectPendingComplexes" resultType="map">
+        SELECT apt_seq, sgg_cd, umd_cd, umd_nm, land_cd, bonbun, bubun, jibun,
+               road_nm, road_nm_sgg_cd, road_nm_cd, road_nmb_cd, road_nm_bonbun, road_nm_bubun,
+               apt_nm, geocode_tried
+        FROM estate.apt_complex
+        WHERE geocode_status IN ('PENDING', 'FAILED')
+          AND geocode_tried &lt; #{maxTries}
+        <if test="sggCd != null and sggCd != ''">
+            AND sgg_cd = #{sggCd}
+        </if>
+        ORDER BY (trade_count + rent_count) DESC
+        LIMIT #{limit}
+    </select>
+
+    <!--
+      좌표를 받았다. **원 좌표계가 API 마다 다르다** — 행안부는 EPSG:5179, VWorld 는 4326 으로
+      요청한다. 그대로 넣으면 엉뚱한 곳에 찍히므로 srid 를 함께 받아 PostGIS 가 변환하게 한다.
+      geom 은 지도 뷰와 같은 3857, lon/lat 은 사람이 눈으로 확인하기 쉬운 4326 으로 둔다.
+    -->
+    <update id="updateComplexCoord">
+        UPDATE estate.apt_complex
+           SET lon              = ST_X(ST_Transform(ST_SetSRID(ST_MakePoint(#{x}, #{y}), #{srid}), 4326)),
+               lat              = ST_Y(ST_Transform(ST_SetSRID(ST_MakePoint(#{x}, #{y}), #{srid}), 4326)),
+               geom             = ST_Transform(ST_SetSRID(ST_MakePoint(#{x}, #{y}), #{srid}), 3857),
+               geocode_status   = 'OK',
+               geocode_source   = #{source},
+               geocode_accuracy = #{accuracy},
+               geocode_tried    = geocode_tried + 1,
+               geocode_error    = NULL,
+               geocoded_at      = now(),
+               update_at        = now()
+         WHERE apt_seq = #{aptSeq}
+    </update>
+
+    <!-- 못 받았다. 사유는 **짧게**(키·요청 본문을 남기지 말 것). -->
+    <update id="markComplexGeocodeFailed">
+        UPDATE estate.apt_complex
+           SET geocode_status = #{status},
+               geocode_tried  = geocode_tried + 1,
+               geocode_error  = left(#{error}, 200),
+               update_at      = now()
+         WHERE apt_seq = #{aptSeq}
+    </update>
+
+    <!-- 진행 상황(배치가 끝을 판단하고, 사람이 볼 때도 쓴다). -->
+    <select id="selectComplexGeocodeStats" resultType="map">
+        SELECT count(*)                                                        AS total,
+               count(*) FILTER (WHERE geocode_status = 'OK')                    AS ok,
+               count(*) FILTER (WHERE geocode_status = 'PENDING')               AS pending,
+               count(*) FILTER (WHERE geocode_status = 'FAILED')                AS failed,
+               count(*) FILTER (WHERE geocode_status = 'SKIPPED')               AS skipped,
+               count(*) FILTER (WHERE geom IS NOT NULL)                         AS with_geom
+        FROM estate.apt_complex
+        <if test="sggCd != null and sggCd != ''">
+            WHERE sgg_cd = #{sggCd}
+        </if>
+    </select>
+
     <select id="insertAptTrades" parameterType="java.util.List" resultType="string">
         INSERT INTO estate.apt_trade (
         sgg_cd, umd_cd, land_cd, bonbun, bubun, jibun,

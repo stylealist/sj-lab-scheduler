@@ -47,6 +47,21 @@ Spring Boot 3.3.2 기반 REST + 스케줄러 서비스. 공공데이터포털, �
   두 표에는 자연키 유니크 인덱스(`NULLS NOT DISTINCT`)가 있고 매퍼가 `ON CONFLICT DO NOTHING`이므로
   **같은 달을 다시 받아도 중복이 쌓이지 않는다** — 이게 백필의 전제다.
 
+## 아파트 단지 좌표(지오코딩) — 2026-10-14 추가
+
+실거래 API 는 좌표를 주지 않아 지도용 좌표를 따로 받는다. 대상은 거래가 아니라 **단지 4.5만 개**다
+(`apt_seq` 로 거래에 붙는다). `EstateGeocodeService` + `EstateGeocodeController` 가 담당한다.
+
+- 표는 `estate.apt_complex`(생성 스크립트 `sj-lab/db/estate/estate_apt_complex.sql`, 담당자 실행).
+- 키는 `apikey.juso`(행안부 좌표제공, 필수)·`apikey.vworld`(보조). **환경변수로만** 주입한다.
+- **cron 에 넣지 않았다** — 한 번 받으면 끝나고 하루 한도가 있어 사람이 나눠 돌린다.
+  드라이버는 `sj-lab/scripts/estate-geocode.ps1`, 절차는 `sj-lab/docs/estate-geocode-workflow.md`.
+- **좌표계가 API 마다 다르다**(행안부 5179 · VWorld 4326). 매퍼가 `srid` 를 받아 PostGIS 가 변환한다 —
+  그대로 넣으면 엉뚱한 곳에 찍힌다.
+- **한도(429·본문 오류)를 빈 결과로 넘기지 말 것.** 그 자리에서 멈추고 `quotaExceeded` 로 알린다 —
+  건너뛰면 그만큼 좌표가 빈다(실거래에서 광주·전남이 그렇게 비었다).
+- 실패 사유는 **종류 이름만** 저장한다(키·요청 본문을 DB·로그에 남기지 말 것).
+
 ## 참고: 인증키·URL 인코딩 주의사항
 
 - 외부 연동 키(`apikey.safe`/`apikey.apis`/`apikey.its`)는 `application.yml`에 값이 박혀 있고 `@Value`로 주입해서 쓴다.
