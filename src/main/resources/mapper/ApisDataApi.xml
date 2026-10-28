@@ -444,6 +444,10 @@
     <!--
       전월세에만 있는 단지도 넣는다(3,069개). 전월세 표에는 umd_cd 가 없어 법정동코드를 만들 수
       없으므로, 그 단지들은 지번 문자열로 좌표를 받는다(VWorld 경로).
+
+      **전월세 표에는 빈 값이 문자열 "null" 로 들어 있다**(수집기가 JSON 의 null 을 그대로 문자로
+      적었다. road_nmb_cd 에만 87.8만 건). 그대로 넣으면 단지 표의 varchar(1) 에서 터지고,
+      안 터지는 컬럼도 좌표 조회가 엉뚱한 값으로 나간다 — 그래서 nullif 로 걸러 넣는다.
     -->
     <insert id="syncAptComplexFromRent">
         INSERT INTO estate.apt_complex (
@@ -456,9 +460,14 @@
                s.apt_nm, s.build_year, s.rent_count
         FROM (
             SELECT DISTINCT ON (r.apt_seq)
-                   r.apt_seq, r.sgg_cd, r.umd_nm, r.jibun,
-                   r.road_nm, r.road_nm_sgg_cd, r.road_nm_cd, r.road_nmb_cd,
-                   r.road_nm_bonbun, r.road_nm_bubun, r.apt_nm, r.build_year,
+                   r.apt_seq, r.sgg_cd, r.umd_nm, nullif(r.jibun, 'null') AS jibun,
+                   nullif(r.road_nm, 'null')        AS road_nm,
+                   nullif(r.road_nm_sgg_cd, 'null') AS road_nm_sgg_cd,
+                   nullif(r.road_nm_cd, 'null')     AS road_nm_cd,
+                   nullif(r.road_nmb_cd, 'null')    AS road_nmb_cd,
+                   nullif(r.road_nm_bonbun, 'null') AS road_nm_bonbun,
+                   nullif(r.road_nm_bubun, 'null')  AS road_nm_bubun,
+                   r.apt_nm, r.build_year,
                    count(*) OVER (PARTITION BY r.apt_seq) AS rent_count
             FROM estate.apt_rent r
             WHERE r.apt_seq IS NOT NULL
@@ -515,6 +524,376 @@
                geocode_error  = left(#{error}, 200),
                update_at      = now()
          WHERE apt_seq = #{aptSeq}
+    </update>
+
+    <!--
+      테두리를 아직 못 받은 단지. **주소 문자열로 묻기 때문에 시도·시군구 이름이 필요하다** —
+      "개포동 141" 처럼 동 이름만 보내면 전국에 같은 이름이 있어 엉뚱한 곳이 나온다.
+      이름은 17행·250행짜리 작은 표에서 붙인다(무거운 집계가 아니다).
+    -->
+    <select id="selectComplexesForBoundary" resultType="map">
+        SELECT c.apt_seq, c.sgg_cd, c.umd_cd, c.umd_nm, c.jibun, c.apt_nm, c.pnu,
+               c.road_nm_sgg_cd, c.road_nm_cd, c.road_nmb_cd, c.road_nm_bonbun, c.road_nm_bubun,
+               -- 도로명(이름)과 핀 좌표: **그 단지 건물 전체**를 찾는 데 쓴다(지번으로 찾으면
+               -- 여러 지번에 걸친 단지가 일부만 잡힌다 — 파크리오 29동 중 5동만 잡혔다).
+               c.road_nm, c.lon, c.lat,
+               g.sido_nm, g.sgg_nm,
+               <!--
+                 **같은 번지를 함께 쓰는 다른 단지들의 주소·핀**(도로명|본번|부번|경도|위도 를 ; 로 이음).
+                 한 번지에 단지가 여럿인 신도시·구축 블록에서 "남의 동"을 덜어내는 데 쓴다 —
+                 우리 주소에 맞는 동이 없으면 번지 전체를 삼켰다(2026-10-27 전국 재수집에서 확인).
+                 sgg_cd 를 함께 걸어 인덱스를 타게 한다(pnu 에는 인덱스가 없어 전수 훑기가 된다).
+               -->
+               (SELECT string_agg(
+                         coalesce(r.road_nm, '') || '|' || coalesce(r.road_nm_bonbun, '') || '|'
+                         || coalesce(r.road_nm_bubun, '') || '|' || coalesce(r.lon::text, '') || '|'
+                         || coalesce(r.lat::text, ''), ';')
+                  FROM estate.apt_complex r
+                 WHERE r.sgg_cd = c.sgg_cd
+                   AND r.apt_seq != c.apt_seq
+                   AND c.pnu IS NOT NULL
+                   AND r.pnu LIKE left(c.pnu, 15) || '%') AS rival_addrs
+        FROM estate.apt_complex c
+        LEFT JOIN (
+            SELECT s.sgg_cd, s.sgg_nm, d.sido_nm
+            FROM public.g_sgg s
+            JOIN public.g_sido d ON d.sido_cd = left(s.sgg_cd, 2)
+        ) g ON g.sgg_cd = c.sgg_cd
+        <!--
+          대지(필지) 모드로 다시 받을 때는 **이미 받은 테두리도 대상**이다 — 건물로 받아 둔
+          테두리는 단지 일부만 덮기 때문이다(파크리오 1만㎡ / 실제 23만㎡). 그래서
+          "아직 없음" 또는 "대지로 받은 것이 아님"을 고른다. 모드를 안 주면 종전대로 빈 것만 고른다.
+        -->
+        <choose>
+            <when test="mode != null and mode == 'site'">
+                <!--
+                  **한 번 시도한 단지는 다시 뽑지 않는다.** 결과를 출처에 남기고
+                  (대지 성공 · 건물로 떨어짐 · PNU 없음 · 건물·필지 없음) 그 표시가 있으면 건너뛴다.
+                  이 표시가 없으면 못 받는 단지가 큐 맨 앞에 영구히 남아 매 회차 같은 단지만
+                  되풀이한다(2026-10-20·21 두 번 겪었다).
+
+                  **출처 뒤에 수집 버전이 붙는다**(예: `VWORLD_LOT_V2`). 영역을 만드는 규칙을
+                  고치면 버전만 올리면 되고, 그러면 앞 버전으로 받아 둔 단지가 자동으로 다시
+                  대상이 된다 — 표를 건드려 표시를 지우는 일(운영 DML)을 하지 않으려는 장치다.
+                -->
+                <!--
+                  한 단지만 지정했으면(aptSeq) 버전 조건을 건너뛴다 — 규칙을 고친 뒤 그 단지만
+                  다시 받아 눈으로 확인하는 용도다. **SQL 안에서 #{aptSeq} 가 NULL 인지 보지 말 것**
+                  — 타입을 알 수 없어 500 이 난다(2026-10-23 수집이 통째로 멈췄다). 조건 자체를
+                  MyBatis 가 넣고 빼게 한다.
+                -->
+                WHERE 1 = 1
+                <if test="aptSeq == null or aptSeq == ''">
+                    AND coalesce(c.boundary_source, '') NOT LIKE '%' || #{siteVer}
+                </if>
+            </when>
+            <otherwise>
+                WHERE c.boundary IS NULL
+            </otherwise>
+        </choose>
+          AND c.jibun IS NOT NULL
+          AND c.umd_nm IS NOT NULL
+        <if test="sggCd != null and sggCd != ''">
+            AND c.sgg_cd = #{sggCd}
+        </if>
+        <!-- 한 단지만 다시 받아 볼 때 쓴다(규칙을 고친 뒤 눈으로 확인하는 용도). -->
+        <if test="aptSeq != null and aptSeq != ''">
+            AND c.apt_seq = #{aptSeq}
+        </if>
+        ORDER BY (c.trade_count + c.rent_count) DESC
+        LIMIT #{limit}
+    </select>
+
+    <!--
+      단지 **대지 영역**을 넣는다(2026-10-21). 건물 외곽이 아니라 **지적도 필지**다.
+
+      왜 바꿨나: 건물만 받으면 그 지번에 선 동들만 그려져, 여러 지번에 걸친 단지는 영역이
+      실제의 몇 분의 일이 된다(실측 파크리오 10,248㎡ / 실제 23만㎡대, 은마 건물 43,175㎡ /
+      대지 237,933㎡). 단지 대지는 지적도에서 **필지 한 개 또는 같은 본번 몇 개**로 떨어진다.
+
+      어떤 필지를 고르나: 받아 온 주변 필지 중 **그 단지 건물이 실제로 올라 있는 것**만 고른다.
+      닿기만 하는 것(도로 건너 옆 단지·보도)을 넣지 않으려고 겹친 면적이 5㎡를 넘는 것만 센다.
+      PNU 가 같은 필지는 건물이 안 잡혀도 넣는다(그 단지의 땅이 맞다).
+
+      핀(geom)은 건드리지 않는다 — 좌표는 이미 96.7% 가 들어와 있고, 영역과 분리해 두면
+      이 작업이 좌표 품질을 망가뜨릴 수 없다.
+    -->
+    <update id="updateComplexSite">
+        <![CDATA[
+        WITH seed AS (
+            SELECT ST_Transform(ST_SetSRID(
+                     ST_CollectionExtract(ST_MakeValid(ST_Collect(ARRAY[
+        ]]>
+        <foreach collection="buildings" item="part" separator=",">
+            ST_GeomFromGeoJSON(#{part})
+        </foreach>
+        <![CDATA[
+                     ])), 3), 4326), 3857) AS g
+        ),
+        ]]>
+        <!--
+          **같은 번지에 단지가 여럿이면 도로명 주소로 나눈다**(2026-10-27, _V9).
+          신도시는 한 번지가 아주 커서 여러 단지가 한 번지에 들어 있다(지축역 일대 5개 단지가
+          한 번지 711,202㎡, 전국 살아 있는 단지의 31% 가 이런 경우다). 번지만으로 땅을 주면
+          그 단지들이 모두 같은 영역을 받는다.
+          그래서 **같은 번지에 있지만 우리 단지 건물이 아닌 동들**(rivals)을 함께 넘겨,
+          필지마다 "우리 건물과 남의 건물 중 어느 쪽이 가까운가"로 주인을 가린다.
+          건물 위치로 가리므로 핀이 어디에 찍혀 있든 흔들리지 않는다.
+        -->
+        <choose>
+            <when test="rivals != null and rivals.size() > 0">
+                <![CDATA[ rival AS ( SELECT ST_Union(g) AS g FROM ( ]]>
+                <foreach collection="rivals" item="rv" separator="UNION ALL">
+                    SELECT ST_Transform(ST_SetSRID(ST_MakeValid(ST_GeomFromGeoJSON(#{rv})), 4326), 3857) AS g
+                </foreach>
+                <![CDATA[ ) rv_all ), ]]>
+            </when>
+            <otherwise>
+                <![CDATA[ rival AS (SELECT NULL::geometry AS g), ]]>
+            </otherwise>
+        </choose>
+        <![CDATA[
+        b AS (SELECT g FROM seed),
+        ]]>
+        <![CDATA[
+        p AS (
+        ]]>
+        <foreach collection="parcels" item="parcel" separator="UNION ALL">
+            SELECT ST_CollectionExtract(ST_MakeValid(ST_GeomFromGeoJSON(#{parcel.geom})), 3) AS g,
+                   #{parcel.pnu} AS pnu
+        </foreach>
+        <![CDATA[
+        ),
+        m AS (   -- 미터 좌표로 한 번만 바꿔 둔다(겹침을 면적으로 재야 한다)
+            SELECT ST_Transform(ST_SetSRID(p.g, 4326), 3857) AS pg,
+                   p.pnu,
+                   b.g AS bg
+            FROM p, b
+        ),
+        bu AS (   -- 그 단지 건물들(합집합)과 바닥 면적 — 판단의 기준점이다
+            SELECT ST_Union(bg) AS g, ST_Area(ST_Union(bg)) AS floor_area
+            FROM (SELECT DISTINCT bg FROM m) one
+        ),
+        strict AS (
+            -- **그 필지의 10% 이상을 건물이 덮는가.** 건물 외곽선이 이웃 필지를 몇 ㎡ 침범하는 일이
+            -- 흔해서(지적도와 건물도의 오차) 조금 걸친 필지로 고르면 옆 단지 땅까지 끌어온다.
+            -- **같은 번지(본번)의 필지는 그 단지 땅이다.** PNU 앞 15자리가 법정동+본번이라
+            -- 1393 · 1393-1 · 1393-2 … 가 한 번지다(2026-10-26, _V8). 주차장·안뜰도 같은 번지의
+            -- 부번으로 나뉘어 있다.
+            -- 단, 한 번지에 단지가 여럿이면(신도시 블록) **우리 건물이 남의 동보다 가까운 필지**만
+            -- 가져간다(2026-10-27, _V9). 우리 건물이 올라선 필지는 거리가 0 이라 언제나 우리 것이다.
+            SELECT pg AS g FROM m, bu, rival
+             WHERE (left(pnu, 15) = left(#{pnu}, 15)
+                    -- **번지가 같아도 우리 동에서 멀면 남의 땅이다**(2026-10-28, _V11).
+                    -- 신도시는 한 번지가 수십만㎡ 라 번지만 보면 옆 단지 땅까지 다 가져온다
+                    -- (세종 집현동 3개 단지가 모두 674,390㎡). 50m 는 동에서 단지 경계까지의
+                    -- 통상 거리다 — 주차장·조경은 들어오고 옆 블록은 빠진다.
+                    AND ST_DWithin(pg, bu.g, 50)
+                    AND (rival.g IS NULL OR ST_Distance(pg, bu.g) <= ST_Distance(pg, rival.g)))
+                OR (ST_Intersects(pg, bg) AND ST_Area(ST_Intersection(pg, bg)) > ST_Area(pg) * 0.10)
+        ),
+        loose AS (
+            -- 엄격한 기준으로 단지를 다 못 덮을 때 쓰는 2차 기준: **건물이 실제로 올라선 필지 전부**
+            -- (여러 지번에 걸친 큰 단지가 한 필지만 잡히는 것을 막는다 — 파크리오 덮는 비율 50%).
+            SELECT pg AS g FROM m
+             WHERE ST_Intersects(pg, bg) AND ST_Area(ST_Intersection(pg, bg)) > 20
+        ),
+        su AS (SELECT ST_Buffer(ST_Buffer(ST_Union(g), 15), -15) AS g FROM strict),
+        lu AS (SELECT ST_Buffer(ST_Buffer(ST_Union(g), 15), -15) AS g FROM loose),
+        site AS (
+            -- **필지가 그 단지 건물을 90% 이상 덮어야 지적을 믿는다.**
+            -- 재건축·재개발 단지는 건물은 최신인데 지적이 아직 분할 전 소필지라, 필지를 모으면
+            -- 옛 아파트 모양의 조각보가 된다(평촌엘프라우드 실측 61필지 · 덮는 비율 73%).
+            -- **반대로 지나치게 넓은 필지도 믿지 않는다**(건물 바닥의 15배까지, 2026-10-28 _V11).
+            -- 미분할 대지는 한 필지가 여러 단지를 품어 그 단지들이 모두 같은 영역을 받는다
+            -- (인천 동춘동 두 단지가 1,048,696㎡). 정상 단지는 바닥의 5~6배다(헬리오시티 5.3 ·
+            -- 메가트리아 6.0) — 15배는 넉넉한 상한이다.
+            -- 1차(엄격) → 2차(건물이 올라선 필지 전부) → 그래도 안 되면 **건물 윤곽**을 12m
+            -- 넓혀 쓴다(단지 경계까지의 통상 거리).
+            SELECT CASE
+                     WHEN su.g IS NOT NULL
+                          AND ST_Area(ST_Intersection(bu.g, su.g)) >= bu.floor_area * 0.90
+                          AND ST_Area(su.g) BETWEEN bu.floor_area * 1.5 AND bu.floor_area * 15
+                          THEN su.g
+                     WHEN lu.g IS NOT NULL
+                          AND ST_Area(ST_Intersection(bu.g, lu.g)) >= bu.floor_area * 0.90
+                          AND ST_Area(lu.g) BETWEEN bu.floor_area * 1.5 AND bu.floor_area * 15
+                          THEN lu.g
+                     -- 지적을 믿을 수 없을 때는 **동들을 감싸는 오목 외곽선**으로 단지 모양을 만든다.
+                     -- 닫기(buffer +30/-18)만 쓰면 동과 동 사이에 구멍이 남고 떨어진 동(215동)이
+                     -- 빠진다(2026-10-22 사용자 지적). ConcaveHull 은 **모든 동을 품으면서** 빈
+                     -- 자리를 메운다 — 0.9 는 꽤 바짝 붙는 값이라 ConvexHull 처럼 부풀지 않는다.
+                     -- 거기에 10m 를 더해 단지 경계선 느낌을 준다. 건물이 선 필지도 함께 덮는다.
+                     -- **여기서도 지나치게 넓은 필지는 쓰지 않는다**(2026-10-28, _V11).
+                     -- 미분할 대지는 한 필지가 수십만㎡ 라, 건물 윤곽으로 넘어와도 그 필지를
+                     -- 합치는 순간 다시 번지 전체가 된다(평택 화양지구 718,657㎡).
+                     ELSE ST_Union(
+                            ST_Buffer(ST_ConcaveHull(bu.g, 0.9), 10),
+                            COALESCE(
+                              CASE WHEN ST_Area(lu.g) <= bu.floor_area * 15 THEN lu.g END,
+                              ST_Buffer(bu.g, 12)))
+                   END AS g,
+                   CASE
+                     WHEN su.g IS NOT NULL
+                          AND ST_Area(ST_Intersection(bu.g, su.g)) >= bu.floor_area * 0.90
+                          AND ST_Area(su.g) BETWEEN bu.floor_area * 1.5 AND bu.floor_area * 15
+                          THEN 'LOT'
+                     WHEN lu.g IS NOT NULL
+                          AND ST_Area(ST_Intersection(bu.g, lu.g)) >= bu.floor_area * 0.90
+                          AND ST_Area(lu.g) BETWEEN bu.floor_area * 1.5 AND bu.floor_area * 15
+                          THEN 'LOT'
+                     ELSE 'BLDG'
+                   END AS kind
+            FROM bu LEFT JOIN su ON TRUE LEFT JOIN lu ON TRUE
+        )
+        , final AS (
+            -- **구멍을 메운다.** 단지 안의 안뜰·주차장·도로 필지가 빠지면 영역에 구멍이 뚫려
+            -- 대지가 아니라 건물 그림처럼 보인다(사용자 지적). 조각마다 바깥 테두리만 남긴다.
+            SELECT ST_Multi(ST_CollectionExtract(ST_MakeValid((
+                     SELECT ST_Collect(ST_MakePolygon(ST_ExteriorRing(d.geom)))
+                       FROM ST_Dump(ST_CollectionExtract(ST_MakeValid(site.g), 3)) d
+                   )), 3)) AS g,
+                   kind
+            FROM site
+        )
+        -- **남의 동이 선 자리는 돌려준다.** 필지를 모으거나 건물 외곽선을 넓히다 보면 같은 번지에
+        -- 있는 남의 동까지 덮는다. 그 동들과 6m 둘레는 덜어낸다(2026-10-27, _V9).
+        -- 핀이 아니라 **건물 위치**로 판단한다 — 핀은 이 작업이 옮기는 값이라 믿을 수 없다
+        -- (2026-10-26: 핀 기준으로 겹침을 잘랐다가 멀쩡한 단지가 반 토막 났다).
+        , cut AS (
+            SELECT CASE
+                     WHEN t.g IS NULL OR ST_IsEmpty(t.g) THEN f.g
+                     ELSE t.g
+                   END AS g,
+                   f.kind
+              FROM final f
+              LEFT JOIN (
+                  SELECT ST_Multi(ST_CollectionExtract(ST_MakeValid(
+                           ST_Difference(final.g, ST_Buffer(rival.g, 6))), 3)) AS g
+                    FROM final, rival
+                   WHERE rival.g IS NOT NULL
+              ) t ON TRUE
+        )
+        UPDATE estate.apt_complex c
+           SET pnu             = #{pnu},
+               boundary        = f.g,
+               boundary_source = CASE WHEN f.kind = 'LOT' THEN #{sourceLot} ELSE #{sourceBldg} END,
+               boundary_at     = now(),
+               -- **핀을 영역 가운데로 옮긴다**(2026-10-22). 행안부 좌표는 건물 출입구라 영역 한쪽에
+               -- 치우쳐 찍힌다(안양역푸르지오더샵에서 사용자가 지적). ST_Centroid 가 아니라
+               -- ST_PointOnSurface 를 쓴다 — ㄷ자·두 블록 단지에서 중심이 바깥으로 나간다.
+               geom            = ST_PointOnSurface(f.g),
+               lon             = ST_X(ST_Transform(ST_PointOnSurface(f.g), 4326)),
+               lat             = ST_Y(ST_Transform(ST_PointOnSurface(f.g), 4326)),
+               geocode_accuracy = 'SITE',
+               update_at       = now()
+          FROM cut f
+         WHERE c.apt_seq = #{aptSeq}
+           AND f.g IS NOT NULL
+           AND NOT ST_IsEmpty(f.g)
+        ]]>
+    </update>
+
+    <!--
+      테두리를 넣고 **핀도 그 안쪽으로 옮긴다**. 행안부가 준 좌표는 단지 중심이 아니라
+      건물 출입구라 가장자리에 찍힌다(은마아파트에서 실제로 그랬다).
+      ST_Centroid 가 아니라 ST_PointOnSurface 를 쓴다 — ㄷ자 단지에서 중심이 바깥으로 나간다.
+    -->
+    <update id="updateComplexBoundary">
+        <![CDATA[
+        WITH raw AS (
+            SELECT ST_Collect(ARRAY[
+        ]]>
+        <foreach collection="parts" item="part" separator=",">
+            ST_GeomFromGeoJSON(#{part})
+        </foreach>
+        <![CDATA[
+            ]) AS g
+        ),
+        src AS (
+            -- **폴리곤만 남긴다.** 건물 레이어에 선·점이 섞여 오면 ST_Collect 결과가
+            -- GeometryCollection 이 되고, MultiPolygon 컬럼에 넣는 순간 터진다(실제로 터졌다).
+            SELECT ST_CollectionExtract(ST_MakeValid(g), 3) AS g FROM raw
+        ),
+        shaped AS (
+            -- 건물 여러 동을 **감싸는 외곽선**을 단지 모양으로 쓴다. 동 하나하나를 그대로 두면
+            -- 지도에서 점점이 흩어져 "단지"로 보이지 않는다.
+            --
+            -- **ConvexHull 을 쓰지 말 것** — ㄱ자·ㄷ자로 앉은 단지에서 빈 땅까지 삼켜
+            -- 실제의 두세 배가 된다(래미안안양메가트리아 11만㎡ → 29만㎡ 로 부풀었다).
+            -- 각 동을 조금 부풀려 합친 뒤 다시 줄이면 단지 모양을 따라가는 외곽선이 된다.
+            -- 조각이 하나(필지)면 그대로 쓴다.
+            SELECT CASE
+                     WHEN ST_NumGeometries(g) <= 1 THEN ST_Transform(ST_SetSRID(g, 4326), 3857)
+                     ELSE ST_Buffer(
+                            ST_Buffer(ST_Transform(ST_SetSRID(g, 4326), 3857), 28),
+                            -16)
+                   END AS geom3857,
+                   -- 핀은 **건물들의 무게중심**이다. 외곽선이 길에 잘려 조각나면
+                   -- ST_PointOnSurface 가 한쪽 조각으로 밀려 단지 끝에 찍힌다(실제로 그랬다).
+                   -- 조각이 하나뿐일 때는 오목한 땅에서 중심이 밖으로 나가지 않게 PointOnSurface 를 쓴다.
+                   CASE
+                     WHEN ST_NumGeometries(g) <= 1
+                       THEN ST_PointOnSurface(ST_Transform(ST_SetSRID(g, 4326), 3857))
+                     ELSE ST_Centroid(ST_Transform(ST_SetSRID(g, 4326), 3857))
+                   END AS pt3857
+            FROM src
+        )
+        UPDATE estate.apt_complex c
+           SET pnu             = #{pnu},
+               boundary        = ST_Multi(s.geom3857),
+               boundary_source = #{source},
+               boundary_at     = now(),
+               geom            = s.pt3857,
+               lon             = ST_X(ST_Transform(s.pt3857, 4326)),
+               lat             = ST_Y(ST_Transform(s.pt3857, 4326)),
+               geocode_status  = 'OK',
+               geocode_source  = 'VWORLD',
+               geocode_accuracy = 'BUILDING',
+               geocode_error   = NULL,
+               geocoded_at     = now(),
+               update_at       = now()
+          FROM shaped s
+         WHERE c.apt_seq = #{aptSeq}
+        ]]>
+    </update>
+
+    <!--
+      테두리 진행 상황만 따로 센다. **좌표 통계와 합치지 않는다** —
+      boundary 컬럼을 더하는 스크립트를 아직 실행하지 않은 DB 에서는 이 쿼리가 깨지는데,
+      합쳐 두면 멀쩡한 좌표 수집까지 같이 멈춘다(2026-10-15 실제로 멈췄다).
+    -->
+    <select id="selectComplexBoundaryCount" resultType="long">
+        SELECT count(*) FILTER (WHERE boundary IS NOT NULL)
+        FROM estate.apt_complex
+        <if test="sggCd != null and sggCd != ''">
+            WHERE sgg_cd = #{sggCd}
+        </if>
+    </select>
+
+    <!--
+      "시도했고 이렇게 끝났다"는 표시만 남긴다(테두리·좌표는 건드리지 않는다).
+      대지로 못 받은 단지를 다음 회차에 또 뽑지 않게 하는 장치다 — 이 표시가 없으면 못 받는
+      단지가 큐 맨 앞에 영구히 남아 같은 50개만 되풀이한다(2026-10-21 실제로 그랬다).
+    -->
+    <update id="markComplexBoundarySource">
+        UPDATE estate.apt_complex
+           SET boundary_source = #{source},
+               update_at       = now()
+         WHERE apt_seq = #{aptSeq}
+    </update>
+
+    <!--
+      받아 둔 테두리를 지운다(다시 받기 위해). 옛 지번으로 엉뚱한 필지를 그렸던 것을
+      건물 기준으로 다시 받을 때 쓴다 — **좌표(geom)는 지우지 않는다**(핀이 사라지면 안 된다).
+    -->
+    <update id="resetComplexBoundary">
+        UPDATE estate.apt_complex
+           SET boundary = NULL, boundary_source = NULL, boundary_at = NULL, pnu = NULL
+         WHERE boundary IS NOT NULL
+        <if test="sggCd != null and sggCd != ''">
+           AND sgg_cd = #{sggCd}
+        </if>
     </update>
 
     <!-- 진행 상황(배치가 끝을 판단하고, 사람이 볼 때도 쓴다). -->

@@ -64,6 +64,38 @@ public class EstateGeocodeController {
         return ResponseEntity.ok(result);
     }
 
+    /**
+     * 단지 영역을 {@code limit} 개 채운다.
+     *
+     * <p>좌표를 받은 뒤에 덧씌우는 <b>2차 패스</b>다. 브이월드 키가 없으면 아무것도 바꾸지 않고
+     * "키 없음"만 답한다.
+     *
+     * <p><b>{@code mode=site}(기본)는 대지(지적도 필지)</b>를 영역으로 쓴다 — 건물만 받으면 그
+     * 지번에 선 동들만 그려져 여러 지번에 걸친 단지가 실제의 몇 분의 일로 나왔다(2026-10-21
+     * 실측 파크리오 1만㎡ / 실제 23만㎡대). 이 모드는 건물로 받아 둔 단지도 다시 고른다.
+     * {@code mode=bldg} 를 주면 종전처럼 건물 외곽으로만 받는다(비교용).
+     */
+    @GetMapping("/estate/complex/boundary")
+    public ResponseEntity<Map<String, Object>> boundary(
+            @RequestParam(defaultValue = "100") int limit,
+            @RequestParam(required = false) String sggCd,
+            @RequestParam(defaultValue = "site") String mode,
+            @RequestParam(required = false) String aptSeq) {
+        int size = Math.max(1, Math.min(limit, 1000));
+        Map<String, Object> result = geocodeService.boundaryBatch(size, sggCd, mode, aptSeq);
+        log.info(">> 단지 테두리 받기: {}", result);
+        return ResponseEntity.ok(result);
+    }
+
+    /** 받아 둔 테두리를 지운다(기준이 바뀌어 다시 받을 때). **좌표는 지우지 않는다.** */
+    @GetMapping("/estate/complex/boundary/reset")
+    public ResponseEntity<Map<String, Object>> boundaryReset(
+            @RequestParam(required = false) String sggCd) {
+        int cleared = geocodeService.resetBoundaries(sggCd);
+        log.info(">> 단지 테두리 초기화: {}건", cleared);
+        return ResponseEntity.ok(Map.of("cleared", cleared));
+    }
+
     /** 진행 상황만 본다(호출 한도를 쓰지 않는다). */
     @GetMapping("/estate/complex/stats")
     public ResponseEntity<Map<String, Object>> stats(

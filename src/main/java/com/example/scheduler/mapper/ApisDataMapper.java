@@ -50,6 +50,55 @@ public interface ApisDataMapper {
     int markComplexGeocodeFailed(
             @Param("aptSeq") String aptSeq, @Param("status") String status, @Param("error") String error);
 
+    /**
+     * 테두리를 받을 단지(시도·시군구 이름을 함께 준다 — 주소로 물어야 하므로).
+     *
+     * @param mode {@code "site"} 면 **이번 수집 버전으로 받지 않은 단지**를 고른다(출처 끝에
+     *             붙는 버전으로 판단한다). 그 밖에는 종전대로 테두리가 빈 단지만 고른다.
+     * @param siteVer 출처에 붙는 수집 버전(예: {@code "_V2"}). 규칙을 고치면 이 값을 올린다.
+     */
+    List<Map<String, Object>> selectComplexesForBoundary(
+            @Param("limit") int limit, @Param("sggCd") String sggCd, @Param("mode") String mode,
+            @Param("siteVer") String siteVer, @Param("aptSeq") String aptSeq);
+
+    /**
+     * 단지 테두리(연속지적도 필지 폴리곤) 저장. **핀도 그 안쪽 중심으로 옮긴다** —
+     * 행안부 좌표는 건물 출입구라 단지 가장자리에 찍힌다.
+     */
+    int updateComplexBoundary(
+            @Param("aptSeq") String aptSeq,
+            @Param("pnu") String pnu,
+            @Param("parts") java.util.List<String> parts,
+            @Param("source") String source);
+
+    /**
+     * 단지 <b>대지 영역</b>(지적도 필지) 저장. 건물이 올라 있는 필지만 골라 합친다.
+     *
+     * @param parcels {@code {"pnu","geom"}} 묶음 목록(주변 필지). 고르는 일은 PostGIS 가 한다.
+     * @param buildings 그 단지 건물 GeoJSON 목록(어느 필지가 이 단지 땅인지 판단하는 씨앗).
+     */
+    int updateComplexSite(
+            @Param("aptSeq") String aptSeq,
+            @Param("pnu") String pnu,
+            @Param("parcels") java.util.List<Map<String, String>> parcels,
+            @Param("buildings") java.util.List<String> buildings,
+            @Param("rivals") java.util.List<String> rivals,
+            @Param("sourceLot") String sourceLot,
+            @Param("sourceBldg") String sourceBldg);
+
+    /**
+     * "시도했고 이렇게 끝났다"는 표시만 남긴다(테두리·좌표는 그대로).
+     *
+     * <p>대지로 못 받은 단지를 다음 회차에 또 뽑지 않게 하는 장치다.
+     */
+    int markComplexBoundarySource(@Param("aptSeq") String aptSeq, @Param("source") String source);
+
+    /** 받아 둔 테두리를 지운다(다시 받기 위해). 좌표는 그대로 둔다. */
+    int resetComplexBoundary(@Param("sggCd") String sggCd);
+
+    /** 테두리를 받은 단지 수. **좌표 통계와 분리**한다 — 컬럼이 없는 DB 에서 같이 깨지지 않게. */
+    long selectComplexBoundaryCount(@Param("sggCd") String sggCd);
+
     /** 진행 상황(전체·성공·대기·실패·건너뜀·좌표 보유). */
     Map<String, Object> selectComplexGeocodeStats(@Param("sggCd") String sggCd);
 
